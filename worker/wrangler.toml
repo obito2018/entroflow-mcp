@@ -7,6 +7,6 @@ account_id = "eab278ebb165ac9c0ce68a68f62f785b"
 binding = "ASSETS"
 bucket_name = "entroflow-assets"
 
-[routes]
+[[routes]]
 pattern = "entroflow.ai/api/*"
 zone_name = "entroflow.ai"
