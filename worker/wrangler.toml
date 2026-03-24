@@ -1,6 +1,7 @@
 name = "entroflow-api"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
+account_id = "eab278ebb165ac9c0ce68a68f62f785b"
 
 [[r2_buckets]]
 binding = "ASSETS"
