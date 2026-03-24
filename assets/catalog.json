@@ -1,0 +1,10 @@
+{
+  "platforms": [
+    {
+      "id": "mihome",
+      "display_name": "米家",
+      "aliases": ["米家", "小米", "xiaomi", "mijia"],
+      "description": "小米/米家智能家居平台"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# 用户数据
+config.json
+data/
+runtime/
+
+# 平台资产（从服务器下载）
+assets/mihome/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
