@@ -8,7 +8,7 @@ import httpx
 
 from core.config import get_install_id
 
-API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://entroflow.io/api")
+API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://entroflow.ai/api")
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 
 
@@ -17,7 +17,7 @@ def _params() -> dict:
 
 
 def _download_and_extract(url: str, dest: Path):
-    resp = httpx.get(url, params=_params(), timeout=30, verify=False)
+    resp = httpx.get(url, params=_params(), timeout=30)
     resp.raise_for_status()
     dest.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -26,14 +26,14 @@ def _download_and_extract(url: str, dest: Path):
 
 def get_platform_latest_version(platform: str) -> str:
     url = f"{API_BASE}/platforms/{platform}/latest"
-    resp = httpx.get(url, params=_params(), timeout=10, verify=False)
+    resp = httpx.get(url, params=_params(), timeout=10)
     resp.raise_for_status()
     return resp.json()["version"]
 
 
 def get_device_latest_version(platform: str, model: str) -> str:
     url = f"{API_BASE}/platforms/{platform}/devices/{model}/latest"
-    resp = httpx.get(url, params=_params(), timeout=10, verify=False)
+    resp = httpx.get(url, params=_params(), timeout=10)
     resp.raise_for_status()
     return resp.json()["version"]
 
@@ -59,6 +59,6 @@ def download_device(model: str, platform: str) -> str:
 def fetch_catalog() -> dict:
     """从服务器拉取 catalog.json。"""
     url = f"{API_BASE}/catalog"
-    resp = httpx.get(url, params=_params(), timeout=10, verify=False)
+    resp = httpx.get(url, params=_params(), timeout=10)
     resp.raise_for_status()
     return resp.json()
