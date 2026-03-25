@@ -62,13 +62,20 @@ Write-Host "正在安装 Python 依赖..."
 Write-Host "依赖安装完成"
 Write-Host ""
 
-# 4. 检测并注册 Agent
+# 4. 确保 config.json 存在
+if (-not (Test-Path "$ENTROFLOW_DIR\config.json")) {
+    '{}' | Out-File -Encoding utf8 "$ENTROFLOW_DIR\config.json"
+}
+
+# 5. 检测并注册 Agent
 Write-Host "正在检测已安装的 Agent..."
 $REGISTERED = @()
 
 # Claude Code
 if (Get-Command "claude" -ErrorAction SilentlyContinue) {
-    & claude mcp add -s user --transport stdio entroflow -- $PYTHON "$ENTROFLOW_DIR\server.py" 2>$null
+    try {
+        & claude mcp add -s user --transport stdio entroflow -- $PYTHON "$ENTROFLOW_DIR\server.py" 2>$null
+    } catch {}
     $REGISTERED += "Claude Code"
 }
 
@@ -81,7 +88,7 @@ if (Test-Path $CURSOR_DIR) {
     }
     & $PYTHON -c @"
 import json
-with open(r'$CURSOR_CONFIG', 'r', encoding='utf-8') as f:
+with open(r'$CURSOR_CONFIG', 'r', encoding='utf-8-sig') as f:
     cfg = json.load(f)
 cfg.setdefault('mcpServers', {})['entroflow'] = {
     'command': r'$PYTHON',
@@ -102,7 +109,7 @@ if (Test-Path $WINDSURF_DIR) {
     }
     & $PYTHON -c @"
 import json
-with open(r'$WINDSURF_CONFIG', 'r', encoding='utf-8') as f:
+with open(r'$WINDSURF_CONFIG', 'r', encoding='utf-8-sig') as f:
     cfg = json.load(f)
 cfg.setdefault('mcpServers', {})['entroflow'] = {
     'command': r'$PYTHON',
@@ -118,11 +125,62 @@ with open(r'$WINDSURF_CONFIG', 'w', encoding='utf-8') as f:
 $CODEX_DIR = "$env:USERPROFILE\.codex"
 $CODEX_CONFIG = "$CODEX_DIR\config.toml"
 if (Test-Path $CODEX_DIR) {
-    $toml_entry = "`n[mcp_servers.entroflow]`ncommand = `"$PYTHON $ENTROFLOW_DIR\server.py`"`n"
-    if (-not (Test-Path $CODEX_CONFIG) -or -not (Select-String -Path $CODEX_CONFIG -Pattern "mcp_servers.entroflow" -Quiet)) {
-        Add-Content -Path $CODEX_CONFIG -Value $toml_entry -Encoding utf8
+    try {
+        & codex mcp add entroflow -- $PYTHON "$ENTROFLOW_DIR\server.py" 2>$null
+        $REGISTERED += "Codex"
+    } catch {
+        # CLI 不可用，回退到直接写 config.toml
+        $toml_entry = "`n[mcp_servers.entroflow]`ncommand = `"$PYTHON`"`nargs = [`"$ENTROFLOW_DIR\server.py`"]`n"
+        if (-not (Test-Path $CODEX_CONFIG) -or -not (Select-String -Path $CODEX_CONFIG -Pattern "mcp_servers.entroflow" -Quiet)) {
+            Add-Content -Path $CODEX_CONFIG -Value $toml_entry -Encoding utf8
+        }
+        $REGISTERED += "Codex"
     }
-    $REGISTERED += "Codex"
+}
+
+# OpenClaw
+$OPENCLAW_DIR = "$env:USERPROFILE\.openclaw"
+$OPENCLAW_CONFIG = "$OPENCLAW_DIR\openclaw.json"
+if (Test-Path $OPENCLAW_DIR) {
+    if (Get-Command "openclaw" -ErrorAction SilentlyContinue) {
+        try {
+            & openclaw mcp set entroflow "{`"command`":`"$PYTHON`",`"args`":[`"$ENTROFLOW_DIR\server.py`"]}" 2>$null
+            $REGISTERED += "OpenClaw"
+        } catch {
+            # CLI failed, fallback to writing openclaw.json
+            & $PYTHON -c @"
+import json, os
+path = r'$OPENCLAW_CONFIG'
+cfg = {}
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        cfg = json.load(f)
+cfg.setdefault('mcp', {}).setdefault('servers', {})['entroflow'] = {
+    'command': r'$PYTHON',
+    'args': [r'$ENTROFLOW_DIR\server.py']
+}
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+"@
+            $REGISTERED += "OpenClaw"
+        }
+    } else {
+        & $PYTHON -c @"
+import json, os
+path = r'$OPENCLAW_CONFIG'
+cfg = {}
+if os.path.exists(path):
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        cfg = json.load(f)
+cfg.setdefault('mcp', {}).setdefault('servers', {})['entroflow'] = {
+    'command': r'$PYTHON',
+    'args': [r'$ENTROFLOW_DIR\server.py']
+}
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+"@
+        $REGISTERED += "OpenClaw"
+    }
 }
 
 # Trae
@@ -134,7 +192,7 @@ if (Test-Path $TRAE_DIR) {
     }
     & $PYTHON -c @"
 import json
-with open(r'$TRAE_CONFIG', 'r', encoding='utf-8') as f:
+with open(r'$TRAE_CONFIG', 'r', encoding='utf-8-sig') as f:
     cfg = json.load(f)
 cfg.setdefault('mcpServers', {})['entroflow'] = {
     'command': r'$PYTHON',

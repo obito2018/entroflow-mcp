@@ -35,7 +35,7 @@ EntroFlow 让你通过 AI Agent 控制智能家居设备。无需写代码，直
 > 扫码完成后告诉我。
 
 用户确认扫码后，调用 `login_poll(platform, session_id)` 检查状态。
-如果返回 `waiting`，等待几秒后再次调用，直到返回 `ok` 或 `expired`。
+如果返回 `waiting`，告知用户仍在等待，待用户说扫码完成后再次调用，不要自动循环轮询。
 如果返回 `expired`，重新调用 `login_start` 获取新二维码。
 
 ### login_start 返回 type=form
@@ -95,7 +95,7 @@ EntroFlow 让你通过 AI Agent 控制智能家居设备。无需写代码，直
 
 ## 设备不支持怎么办
 
-`device_discover` 返回【暂不支持】的设备，可以访问 entroflow.io/submit 提交支持需求。
+`device_discover` 返回【暂不支持】的设备，可以访问 entroflow.ai 官网提交支持需求。
 
 ---
 

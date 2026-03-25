@@ -2,7 +2,6 @@
 set -e
 
 ENTROFLOW_DIR="$HOME/.entroflow"
-API_BASE="https://entroflow.ai/api"
 GITHUB_ZIP="https://github.com/obito2018/entroflow-mcp/archive/refs/heads/main.zip"
 
 echo "=== EntroFlow 安装程序 ==="
@@ -16,12 +15,6 @@ if ! command -v python3 &>/dev/null; then
 fi
 
 PYTHON=$(command -v python3)
-PIP=$(command -v pip3 2>/dev/null || command -v pip 2>/dev/null)
-
-if [ -z "$PIP" ]; then
-    echo "错误：未检测到 pip。请确认 Python 安装完整。"
-    exit 1
-fi
 
 echo "Python: $PYTHON"
 echo ""
@@ -53,12 +46,11 @@ echo ""
 
 # 3. 安装 Python 依赖
 echo "正在安装 Python 依赖..."
-$PIP install -r "$ENTROFLOW_DIR/requirements.txt" -q
+"$PYTHON" -m pip install -r "$ENTROFLOW_DIR/requirements.txt" -q
 echo "依赖安装完成"
 echo ""
 
-# 4. 写入 ENTROFLOW_API_BASE（等域名注册后去掉）
-mkdir -p "$ENTROFLOW_DIR"
+# 4. 确保 config.json 存在
 if [ ! -f "$ENTROFLOW_DIR/config.json" ]; then
     echo '{}' > "$ENTROFLOW_DIR/config.json"
 fi
@@ -66,20 +58,15 @@ fi
 # 5. 检测并注册 Agent
 echo "正在检测已安装的 Agent..."
 REGISTERED=()
-SKIPPED=()
-
-MCP_ENTRY=$(cat <<EOF
-{
-  "command": "$PYTHON",
-  "args": ["$ENTROFLOW_DIR/server.py"]
-}
-EOF
-)
 
 # Claude Code
 if command -v claude &>/dev/null; then
-    claude mcp add -s user --transport stdio entroflow -- "$PYTHON" "$ENTROFLOW_DIR/server.py" 2>/dev/null || true
-    REGISTERED+=("Claude Code")
+    if claude mcp add -s user --transport stdio entroflow -- "$PYTHON" "$ENTROFLOW_DIR/server.py" 2>/dev/null; then
+        REGISTERED+=("Claude Code")
+    else
+        # 已存在或其他错误，仍视为已注册
+        REGISTERED+=("Claude Code")
+    fi
 fi
 
 # Cursor
@@ -126,14 +113,45 @@ fi
 # Codex
 CODEX_CONFIG="$HOME/.codex/config.toml"
 if [ -d "$HOME/.codex" ]; then
-    if ! grep -q "\[mcp_servers.entroflow\]" "$CODEX_CONFIG" 2>/dev/null; then
-        cat >> "$CODEX_CONFIG" <<TOML
+    if command -v codex &>/dev/null; then
+        codex mcp add entroflow -- "$PYTHON" "$ENTROFLOW_DIR/server.py" 2>/dev/null || true
+    else
+        # CLI 不可用，回退到直接写 config.toml
+        if ! grep -q "\[mcp_servers.entroflow\]" "$CODEX_CONFIG" 2>/dev/null; then
+            cat >> "$CODEX_CONFIG" <<TOML
 
 [mcp_servers.entroflow]
-command = "$PYTHON $ENTROFLOW_DIR/server.py"
+command = "$PYTHON"
+args = ["$ENTROFLOW_DIR/server.py"]
 TOML
+        fi
     fi
     REGISTERED+=("Codex")
+fi
+
+# OpenClaw
+OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+if [ -d "$HOME/.openclaw" ]; then
+    if command -v openclaw &>/dev/null; then
+        openclaw mcp set entroflow "{\"command\":\"$PYTHON\",\"args\":[\"$ENTROFLOW_DIR/server.py\"]}" 2>/dev/null || true
+    else
+        # CLI 不可用，直接写 openclaw.json
+        "$PYTHON" -c "
+import json, os
+path = '$OPENCLAW_CONFIG'
+cfg = {}
+if os.path.exists(path):
+    with open(path, 'r') as f:
+        cfg = json.load(f)
+cfg.setdefault('mcp', {}).setdefault('servers', {})['entroflow'] = {
+    'command': '$PYTHON',
+    'args': ['$ENTROFLOW_DIR/server.py']
+}
+with open(path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+    fi
+    REGISTERED+=("OpenClaw")
 fi
 
 # Trae
