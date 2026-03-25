@@ -50,7 +50,9 @@ jobs:
         run: |
           wrangler r2 object put entroflow-assets/server/v${{ steps.version.outputs.version }}.zip \
             --file dist/v${{ steps.version.outputs.version }}.zip \
-            --content-type application/zip
+            --content-type application/zip \
+            --remote
           wrangler r2 object put entroflow-assets/server/latest.json \
             --file dist/latest.json \
-            --content-type application/json
+            --content-type application/json \
+            --remote
