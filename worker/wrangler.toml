@@ -7,6 +7,15 @@ account_id = "eab278ebb165ac9c0ce68a68f62f785b"
 binding = "ASSETS"
 bucket_name = "entroflow-assets"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "entroflow-db"
+database_id = "75b05d73-2341-46a1-9e41-56e79c621cc8"
+
 [[routes]]
 pattern = "entroflow.ai/api/*"
+zone_name = "entroflow.ai"
+
+[[routes]]
+pattern = "entroflow.ai/v1/*"
 zone_name = "entroflow.ai"
