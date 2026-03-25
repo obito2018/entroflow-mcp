@@ -175,6 +175,27 @@ with open('$OPENCODE_CONFIG', 'w') as f:
     REGISTERED+=("OpenCode")
 fi
 
+# Antigravity
+ANTIGRAVITY_DIR="$HOME/.gemini/antigravity"
+ANTIGRAVITY_CONFIG="$ANTIGRAVITY_DIR/mcp_config.json"
+if [ -d "$ANTIGRAVITY_DIR" ]; then
+    if [ ! -f "$ANTIGRAVITY_CONFIG" ]; then
+        echo '{"mcpServers":{}}' > "$ANTIGRAVITY_CONFIG"
+    fi
+    "$PYTHON" -c "
+import json
+with open('$ANTIGRAVITY_CONFIG', 'r') as f:
+    cfg = json.load(f)
+cfg.setdefault('mcpServers', {})['entroflow'] = {
+    'command': '$PYTHON',
+    'args': ['$ENTROFLOW_DIR/server.py']
+}
+with open('$ANTIGRAVITY_CONFIG', 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+    REGISTERED+=("Antigravity")
+fi
+
 # Trae
 TRAE_CONFIG="$HOME/.trae/mcp.json"
 if [ -d "$HOME/.trae" ]; then

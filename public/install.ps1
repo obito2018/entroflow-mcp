@@ -204,6 +204,27 @@ with open(r'$OPENCODE_CONFIG', 'w', encoding='utf-8') as f:
     $REGISTERED += "OpenCode"
 }
 
+# Antigravity
+$ANTIGRAVITY_DIR = "$env:USERPROFILE\.gemini\antigravity"
+$ANTIGRAVITY_CONFIG = "$ANTIGRAVITY_DIR\mcp_config.json"
+if (Test-Path $ANTIGRAVITY_DIR) {
+    if (-not (Test-Path $ANTIGRAVITY_CONFIG)) {
+        '{"mcpServers":{}}' | Out-File -Encoding utf8 $ANTIGRAVITY_CONFIG
+    }
+    & $PYTHON -c @"
+import json
+with open(r'$ANTIGRAVITY_CONFIG', 'r', encoding='utf-8-sig') as f:
+    cfg = json.load(f)
+cfg.setdefault('mcpServers', {})['entroflow'] = {
+    'command': r'$PYTHON',
+    'args': [r'$ENTROFLOW_DIR\server.py']
+}
+with open(r'$ANTIGRAVITY_CONFIG', 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+"@
+    $REGISTERED += "Antigravity"
+}
+
 # Trae
 $TRAE_DIR = "$env:USERPROFILE\.trae"
 $TRAE_CONFIG = "$TRAE_DIR\mcp.json"
