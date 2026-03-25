@@ -1,0 +1,57 @@
+name: Package and Upload Server to R2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'server.py'
+      - 'skill.md'
+      - 'requirements.txt'
+      - 'core/**'
+      - 'tools/**'
+      - 'assets/catalog.json'
+      - '.github/workflows/deploy-server.yml'
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version from commit SHA
+        id: version
+        run: echo "version=1.0.$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Package server zip
+        run: |
+          mkdir -p dist
+          zip -r dist/v${{ steps.version.outputs.version }}.zip \
+            server.py \
+            skill.md \
+            requirements.txt \
+            core \
+            tools \
+            assets/catalog.json \
+            --exclude "**/__pycache__/*" \
+            --exclude "**/*.pyc"
+
+      - name: Write latest.json
+        run: |
+          echo '{"version":"${{ steps.version.outputs.version }}"}' > dist/latest.json
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          wrangler r2 object put entroflow-assets/server/v${{ steps.version.outputs.version }}.zip \
+            --file dist/v${{ steps.version.outputs.version }}.zip \
+            --content-type application/zip \
+            --account-id eab278ebb165ac9c0ce68a68f62f785b
+          wrangler r2 object put entroflow-assets/server/latest.json \
+            --file dist/latest.json \
+            --content-type application/json \
+            --account-id eab278ebb165ac9c0ce68a68f62f785b
