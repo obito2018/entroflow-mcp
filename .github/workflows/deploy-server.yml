@@ -46,12 +46,11 @@ jobs:
       - name: Upload to R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: eab278ebb165ac9c0ce68a68f62f785b
         run: |
           wrangler r2 object put entroflow-assets/server/v${{ steps.version.outputs.version }}.zip \
             --file dist/v${{ steps.version.outputs.version }}.zip \
-            --content-type application/zip \
-            --account-id eab278ebb165ac9c0ce68a68f62f785b
+            --content-type application/zip
           wrangler r2 object put entroflow-assets/server/latest.json \
             --file dist/latest.json \
-            --content-type application/json \
-            --account-id eab278ebb165ac9c0ce68a68f62f785b
+            --content-type application/json
