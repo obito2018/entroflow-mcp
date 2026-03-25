@@ -87,10 +87,15 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       if (!id?.trim()) return badRequest("id is required");
       if (!name_en?.trim()) return badRequest("name_en is required");
 
+      // aliases can be array or comma-separated string — normalize to JSON array string
+      const aliasesJson = aliases
+        ? JSON.stringify(Array.isArray(aliases) ? aliases : aliases.split(',').map((s: string) => s.trim()).filter(Boolean))
+        : null;
+
       const ts = now();
       await env.DB.prepare(
         "INSERT INTO hardware_platforms (id, name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(id.trim(), name_en.trim(), name_zh || null, aliases ? JSON.stringify(aliases) : null, description_en || null, description_zh || null, logo_url || null, website_url || null, status, admin.id, admin.id, ts, ts).run();
+      ).bind(id.trim(), name_en.trim(), name_zh || null, aliasesJson, description_en || null, description_zh || null, logo_url || null, website_url || null, status, admin.id, admin.id, ts, ts).run();
       return jsonResponse({ success: true }, 201);
     }
   }
@@ -102,9 +107,12 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       let body: any;
       try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
       const { name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status } = body;
+      const aliasesJson = aliases !== undefined
+        ? JSON.stringify(Array.isArray(aliases) ? aliases : aliases.split(',').map((s: string) => s.trim()).filter(Boolean))
+        : null;
       await env.DB.prepare(
         "UPDATE hardware_platforms SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), aliases=COALESCE(?,aliases), description_en=COALESCE(?,description_en), description_zh=COALESCE(?,description_zh), logo_url=COALESCE(?,logo_url), website_url=COALESCE(?,website_url), status=COALESCE(?,status), updated_by=?, updated_at=? WHERE id=?"
-      ).bind(name_en||null, name_zh||null, aliases?JSON.stringify(aliases):null, description_en||null, description_zh||null, logo_url||null, website_url||null, status||null, admin.id, now(), id).run();
+      ).bind(name_en||null, name_zh||null, aliasesJson, description_en||null, description_zh||null, logo_url||null, website_url||null, status||null, admin.id, now(), id).run();
       return jsonResponse({ success: true });
     }
     if (request.method === "DELETE") {
