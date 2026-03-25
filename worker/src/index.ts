@@ -71,6 +71,18 @@ export default {
       return jsonResponse(data);
     }
 
+    // GET /api/platforms/{platform}/devices/{model}/action_specs
+    const deviceActionSpecs = path.match(/^\/api\/platforms\/([^\/]+)\/devices\/([^\/]+)\/action_specs$/);
+    if (deviceActionSpecs) {
+      const [, platform, model] = deviceActionSpecs;
+      const obj = await env.ASSETS.get(`platforms/${platform}/devices/${model}/action_specs.md`);
+      if (!obj) return notFound(`action_specs for '${model}' not found`);
+      const text = await obj.text();
+      return new Response(text, {
+        headers: { ...CORS_HEADERS, "Content-Type": "text/markdown; charset=utf-8" },
+      });
+    }
+
     // GET /api/platforms/{platform}/devices/{model}/{version}
     const deviceDownload = path.match(/^\/api\/platforms\/([^\/]+)\/devices\/([^\/]+)\/([^\/]+)$/);
     if (deviceDownload && deviceDownload[3] !== "latest") {
