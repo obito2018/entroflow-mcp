@@ -35,8 +35,6 @@ Write-Host "正在下载 EntroFlow MCP Server..."
 $TMP_ZIP = "$env:TEMP\entroflow_main.zip"
 $TMP_DIR = "$env:TEMP\entroflow_extract"
 
-# 跳过 SSL 验证（临时，等正式域名配好后去掉）
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 Invoke-WebRequest -Uri $GITHUB_ZIP -OutFile $TMP_ZIP -UseBasicParsing
 
 if (Test-Path $TMP_DIR) { Remove-Item -Recurse -Force $TMP_DIR }
