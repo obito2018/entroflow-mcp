@@ -3,6 +3,7 @@ import { CORS_HEADERS, notFound } from "./lib/utils";
 import { handleAssetRoutes } from "./routes/assets";
 import { handlePublicRoutes } from "./routes/public";
 import { handleAuthRoutes } from "./routes/auth";
+import { handleOAuthRoutes } from "./routes/oauth";
 import { handleDownloadRoutes } from "./routes/download";
 import { handleAdminRoutes } from "./routes/admin";
 import { handleInitRoute } from "./routes/init";
@@ -31,12 +32,18 @@ export default {
     }
 
     // /v1/admin/* — Admin routes
-    if (path.startsWith("/v1/admin/") || path === "/v1/admin/auth/login") {
+    if (path.startsWith("/v1/admin/")) {
       const res = await handleAdminRoutes(path, request, env);
       if (res) return res;
     }
 
-    // /v1/auth/* — User auth routes
+    // /v1/auth/google* and /v1/auth/github* — OAuth routes
+    if (path.startsWith("/v1/auth/google") || path.startsWith("/v1/auth/github")) {
+      const res = await handleOAuthRoutes(path, request, env);
+      if (res) return res;
+    }
+
+    // /v1/auth/* — Email auth routes
     if (path.startsWith("/v1/auth/")) {
       const res = await handleAuthRoutes(path, request, env);
       if (res) return res;
