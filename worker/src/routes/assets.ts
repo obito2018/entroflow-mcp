@@ -3,6 +3,21 @@ import { jsonResponse, notFound } from "../lib/utils";
 
 export async function handleAssetRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
+  // GET /api/uploads/* — serve uploaded files from R2
+  if (path.startsWith("/api/uploads/")) {
+    const key = path.slice("/api/uploads/".length);
+    const obj = await env.ASSETS.get(key);
+    if (!obj) return notFound(`File not found: ${key}`);
+    const contentType = obj.httpMetadata?.contentType || "application/octet-stream";
+    return new Response(obj.body, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=31536000",
+      },
+    });
+  }
+
   // GET /api/server/latest
   if (path === "/api/server/latest") {
     const obj = await env.ASSETS.get("server/latest.json");
