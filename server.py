@@ -15,7 +15,7 @@ from tools.device import device_search, device_status, device_control, device_re
 from tools.platform import platform_install, platform_list
 from tools.login import login_start, login_poll
 from tools.discovery import device_discover, device_install
-from tools.system import check_updates
+from tools.system import check_updates, update_server
 
 # ---------------------------------------------------------------------------
 # MCP Server
@@ -44,6 +44,7 @@ mcp.tool()(login_poll)
 mcp.tool()(device_discover)
 mcp.tool()(device_install)
 mcp.tool()(check_updates)
+mcp.tool()(update_server)
 
 # ---------------------------------------------------------------------------
 # 启动

@@ -62,3 +62,27 @@ def fetch_catalog() -> dict:
     resp = httpx.get(url, params=_params(), timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+def get_server_latest_version() -> str:
+    """获取 MCP Server 最新版本号。"""
+    url = f"{API_BASE}/server/latest"
+    resp = httpx.get(url, params=_params(), timeout=10)
+    resp.raise_for_status()
+    return resp.json()["version"]
+
+
+def download_server() -> str:
+    """下载最新 MCP Server 代码，覆盖本地文件，返回版本号。"""
+    version = get_server_latest_version()
+    url = f"{API_BASE}/server/{version}"
+    dest = Path.home() / ".entroflow"
+    resp = httpx.get(url, params=_params(), timeout=60)
+    resp.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        for member in zf.namelist():
+            # 只覆盖代码文件，跳过用户数据
+            if any(member.startswith(p) for p in ("data/", "runtime/", "config.json")):
+                continue
+            zf.extract(member, dest)
+    return version

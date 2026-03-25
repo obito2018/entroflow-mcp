@@ -66,3 +66,28 @@ def check_updates() -> str:
 
     return "\n".join(lines)
 
+
+def update_server() -> str:
+    """检查并更新 MCP Server 自身代码。更新后需重启 Agent 才能生效。"""
+    try:
+        remote_ver = downloader.get_server_latest_version()
+    except Exception as e:
+        return f"检查 MCP Server 版本失败：{e}"
+
+    local_ver = config.get_server_version()
+
+    if local_ver == remote_ver:
+        return f"MCP Server 已是最新版本（{local_ver}）。"
+
+    try:
+        new_ver = downloader.download_server()
+        config.set_server_version(new_ver)
+    except Exception as e:
+        return f"更新 MCP Server 失败：{e}"
+
+    from_str = f"{local_ver} → " if local_ver else ""
+    return (
+        f"MCP Server 已更新（{from_str}{new_ver}）。\n"
+        "请重启 Agent 使新版本生效。"
+    )
+

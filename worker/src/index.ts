@@ -28,6 +28,29 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
+    // GET /api/server/latest
+    if (path === "/api/server/latest") {
+      const obj = await env.ASSETS.get("server/latest.json");
+      if (!obj) return notFound("server/latest.json not found");
+      const data = await obj.json();
+      return jsonResponse(data);
+    }
+
+    // GET /api/server/{version}
+    const serverDownload = path.match(/^\/api\/server\/([^\/]+)$/);
+    if (serverDownload) {
+      const version = serverDownload[1];
+      const obj = await env.ASSETS.get(`server/v${version}.zip`);
+      if (!obj) return notFound(`Server v${version} not found`);
+      return new Response(obj.body, {
+        headers: {
+          ...CORS_HEADERS,
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename=entroflow-server-v${version}.zip`,
+        },
+      });
+    }
+
     // GET /api/catalog
     if (path === "/api/catalog") {
       const obj = await env.ASSETS.get("catalog.json");

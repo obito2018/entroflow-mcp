@@ -77,3 +77,13 @@ def set_installed_platforms(platforms: list):
     data = _load()
     data["installed_agent_platforms"] = platforms
     _save(data)
+
+
+def get_server_version() -> str | None:
+    return _load().get("server_version")
+
+
+def set_server_version(version: str):
+    data = _load()
+    data["server_version"] = version
+    _save(data)
