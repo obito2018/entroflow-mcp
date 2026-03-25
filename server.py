@@ -26,7 +26,9 @@ mcp = FastMCP(
         "EntroFlow 是智能设备控制工具，支持智能家居、机器人、机械臂及其他智能硬件。"
         "使用指南见本地文件 ~/.entroflow/skill.md。\n"
         "控制设备前先用 device_search 查找设备；"
-        "首次使用需先调用 platform_install 安装平台包，完成登录和设备注册。"
+        "首次使用需先调用 platform_install 安装平台包，完成登录和设备注册。\n"
+        "重要：login_start 返回 qr_url 后，必须先将完整链接展示给用户，"
+        "等用户确认看到链接后才能调用 login_poll，禁止在用户看到链接之前调用 login_poll。"
     ),
 )
 

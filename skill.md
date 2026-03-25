@@ -28,10 +28,12 @@ EntroFlow 让你通过 AI Agent 控制各类智能设备，包括智能家居、
 
 ### login_start 返回 type=qrcode
 
-将 `qr_url` 展示给用户，引导用户在浏览器打开并用对应 App 扫码：
+**必须先把 `qr_url` 完整展示给用户，等用户确认看到链接后，再做任何其他操作。禁止在用户看到链接之前调用 `login_poll`。**
+
+展示方式：
 
 > 请在浏览器中打开以下链接，用米家 App 扫描二维码：
-> [链接]
+> [qr_url]
 > 扫码完成后告诉我。
 
 用户确认扫码后，调用 `login_poll(platform, session_id)` 检查状态。
