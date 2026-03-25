@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 EntroFlow MCP Server
-连接 AI Agent 与智能家居的开放协议层。
+连接 AI Agent 与智能设备的开放协议层。支持智能家居、机器人、机械臂及其他智能硬件。
 """
 import sys
 from pathlib import Path
@@ -23,7 +23,7 @@ from tools.system import check_updates
 mcp = FastMCP(
     "EntroFlow",
     instructions=(
-        "EntroFlow 是智能家居控制工具。"
+        "EntroFlow 是智能设备控制工具，支持智能家居、机器人、机械臂及其他智能硬件。"
         "使用指南见本地文件 ~/.entroflow/skill.md。\n"
         "控制设备前先用 device_search 查找设备；"
         "首次使用需先调用 platform_install 安装平台包，完成登录和设备注册。"
