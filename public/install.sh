@@ -154,6 +154,27 @@ with open(path, 'w') as f:
     REGISTERED+=("OpenClaw")
 fi
 
+# OpenCode
+OPENCODE_DIR="$HOME/.config/opencode"
+OPENCODE_CONFIG="$OPENCODE_DIR/opencode.json"
+if [ -d "$OPENCODE_DIR" ]; then
+    if [ ! -f "$OPENCODE_CONFIG" ]; then
+        echo '{}' > "$OPENCODE_CONFIG"
+    fi
+    "$PYTHON" -c "
+import json
+with open('$OPENCODE_CONFIG', 'r') as f:
+    cfg = json.load(f)
+cfg.setdefault('mcp', {})['entroflow'] = {
+    'type': 'local',
+    'command': ['$PYTHON', '$ENTROFLOW_DIR/server.py']
+}
+with open('$OPENCODE_CONFIG', 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+    REGISTERED+=("OpenCode")
+fi
+
 # Trae
 TRAE_CONFIG="$HOME/.trae/mcp.json"
 if [ -d "$HOME/.trae" ]; then

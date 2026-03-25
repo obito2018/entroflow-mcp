@@ -183,6 +183,27 @@ with open(path, 'w', encoding='utf-8') as f:
     }
 }
 
+# OpenCode
+$OPENCODE_DIR = "$env:USERPROFILE\.config\opencode"
+$OPENCODE_CONFIG = "$OPENCODE_DIR\opencode.json"
+if (Test-Path $OPENCODE_DIR) {
+    if (-not (Test-Path $OPENCODE_CONFIG)) {
+        '{}' | Out-File -Encoding utf8 $OPENCODE_CONFIG
+    }
+    & $PYTHON -c @"
+import json
+with open(r'$OPENCODE_CONFIG', 'r', encoding='utf-8-sig') as f:
+    cfg = json.load(f)
+cfg.setdefault('mcp', {})['entroflow'] = {
+    'type': 'local',
+    'command': [r'$PYTHON', r'$ENTROFLOW_DIR\server.py']
+}
+with open(r'$OPENCODE_CONFIG', 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+"@
+    $REGISTERED += "OpenCode"
+}
+
 # Trae
 $TRAE_DIR = "$env:USERPROFILE\.trae"
 $TRAE_CONFIG = "$TRAE_DIR\mcp.json"
