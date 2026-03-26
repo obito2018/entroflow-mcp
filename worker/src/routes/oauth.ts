@@ -2,6 +2,7 @@ import { Env } from "../lib/types";
 import { jsonResponse, badRequest, uuid, now, signJwt } from "../lib/utils";
 
 const FRONTEND_URL = "https://entroflow.ai";
+const API_BASE = "https://api.entroflow.ai";
 
 export async function handleOAuthRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
@@ -10,7 +11,7 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
     const state = uuid();
     const params = new URLSearchParams({
       client_id: env.GOOGLE_CLIENT_ID,
-      redirect_uri: `https://entroflow.ai/v1/auth/google/callback`,
+      redirect_uri: `${API_BASE}/v1/auth/google/callback`,
       response_type: "code",
       scope: "openid email profile",
       state,
@@ -38,7 +39,7 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
           code,
           client_id: env.GOOGLE_CLIENT_ID,
           client_secret: env.GOOGLE_CLIENT_SECRET,
-          redirect_uri: `https://entroflow.ai/v1/auth/google/callback`,
+          redirect_uri: `${API_BASE}/v1/auth/google/callback`,
           grant_type: "authorization_code",
         }),
       });
@@ -98,7 +99,7 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
     const state = uuid();
     const params = new URLSearchParams({
       client_id: env.GITHUB_CLIENT_ID,
-      redirect_uri: `https://entroflow.ai/v1/auth/github/callback`,
+      redirect_uri: `${API_BASE}/v1/auth/github/callback`,
       scope: "user:email",
       state,
     });
@@ -127,7 +128,7 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
           client_id: env.GITHUB_CLIENT_ID,
           client_secret: env.GITHUB_CLIENT_SECRET,
           code,
-          redirect_uri: `https://entroflow.ai/v1/auth/github/callback`,
+          redirect_uri: `${API_BASE}/v1/auth/github/callback`,
         }),
       });
       const tokenData = await tokenRes.json() as any;

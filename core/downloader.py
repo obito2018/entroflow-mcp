@@ -8,7 +8,7 @@ import httpx
 
 from core.config import get_install_id
 
-API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://entroflow.ai/api")
+API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://api.entroflow.ai/api")
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 
 
