@@ -9,7 +9,24 @@ async function requireAdmin(request: Request, env: Env): Promise<{ id: string; r
   return { id: payload.sub, role: payload.role };
 }
 
-// Regenerate catalog.json in R2 from published platforms in D1
+// Auto-generate mihome_devices.json from R2 device directories
+async function syncDeviceList(platformId: string, env: Env): Promise<void> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT d.product_id FROM devices d
+       INNER JOIN device_versions dv ON dv.device_id = d.id
+       WHERE d.platform_id = ? AND d.status = 'published' AND dv.zip_r2_key IS NOT NULL`
+    ).bind(platformId).all();
+
+    const devices = results.map((r: any) => ({ model: r.product_id }));
+    const json = JSON.stringify(devices, null, 2);
+    await env.ASSETS.put(`platforms/${platformId}/mihome_devices.json`, json, {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch (e) {
+    console.error("Failed to sync device list:", e);
+  }
+}
 async function syncCatalogToR2(env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
@@ -287,6 +304,44 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
     }
   }
 
+  // ── Platform Connector Upload ─────────────────────────────────────────────
+
+  // GET /v1/admin/platforms/:id/connector — get current connector version
+  const platformConnector = path.match(/^\/v1\/admin\/platforms\/([^/]+)\/connector$/);
+  if (platformConnector) {
+    const platformId = platformConnector[1];
+    if (request.method === "GET") {
+      const latest = await env.ASSETS.get(`platforms/${platformId}/latest.json`);
+      if (!latest) return jsonResponse({ version: null });
+      return jsonResponse(await latest.json());
+    }
+    if (request.method === "POST") {
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+      const version = (formData.get("version") as string || "").trim();
+      if (!file) return badRequest("file is required");
+      if (!version) return badRequest("version is required");
+
+      // Upload zip to R2
+      const zipKey = `platforms/${platformId}/v${version}.zip`;
+      await env.ASSETS.put(zipKey, file.stream(), {
+        httpMetadata: { contentType: "application/zip" },
+      });
+
+      // Update latest.json
+      await env.ASSETS.put(`platforms/${platformId}/latest.json`,
+        JSON.stringify({ version }), {
+          httpMetadata: { contentType: "application/json" },
+        }
+      );
+
+      // Sync device list
+      await syncDeviceList(platformId, env);
+
+      return jsonResponse({ success: true, version, r2_key: zipKey }, 201);
+    }
+  }
+
   // ── Device Versions ──────────────────────────────────────────────────────
 
   const deviceVersions = path.match(/^\/v1\/admin\/devices\/([^/]+)\/versions$/);
@@ -312,6 +367,11 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       await env.DB.prepare(
         "INSERT INTO device_versions (id, device_id, version, is_latest, zip_r2_key, action_specs_r2_key, readme_r2_key, published_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(id, deviceId, version.trim(), is_latest?1:0, zip_r2_key||null, action_specs_r2_key||null, readme_r2_key||null, ts, admin.id, ts).run();
+
+      // Sync device list for the platform
+      const device = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(deviceId).first<{ platform_id: string }>();
+      if (device) await syncDeviceList(device.platform_id, env);
+
       return jsonResponse({ id }, 201);
     }
   }

@@ -158,6 +158,17 @@ export async function handleAssetRoutes(path: string, request: Request, env: Env
     });
   }
 
+  // GET /api/platforms/{platform}/mihome_devices.json
+  const platformDeviceList = path.match(/^\/api\/platforms\/([^/]+)\/mihome_devices\.json$/);
+  if (platformDeviceList) {
+    const platform = platformDeviceList[1];
+    const obj = await env.ASSETS.get(`platforms/${platform}/mihome_devices.json`);
+    if (!obj) return notFound(`Device list for '${platform}' not found`);
+    return new Response(await obj.text(), {
+      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-cache" },
+    });
+  }
+
   // GET /api/server/latest
   if (path === "/api/server/latest") {
     const obj = await env.ASSETS.get("server/latest.json");

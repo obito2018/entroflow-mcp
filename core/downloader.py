@@ -39,11 +39,22 @@ def get_device_latest_version(platform: str, model: str) -> str:
 
 
 def download_platform(platform: str) -> str:
-    """下载平台包，解压到 assets/{platform}/connector/，返回版本号。"""
+    """下载平台包，解压到 assets/{platform}/connector/，同时下载 mihome_devices.json，返回版本号。"""
     version = get_platform_latest_version(platform)
     url = f"{API_BASE}/platforms/{platform}/{version}"
     dest = ASSETS_DIR / platform / "connector"
     _download_and_extract(url, dest)
+
+    # 下载设备列表文件（独立于平台包）
+    devices_url = f"{API_BASE}/platforms/{platform}/mihome_devices.json"
+    try:
+        resp = httpx.get(devices_url, params=_params(), timeout=10)
+        if resp.status_code == 200:
+            devices_path = dest / "mihome_devices.json"
+            devices_path.write_bytes(resp.content)
+    except Exception:
+        pass  # 非致命，设备列表文件不存在时忽略
+
     return version
 
 
