@@ -67,8 +67,8 @@ export async function handleEmailAuthRoutes(path: string, request: Request, env:
       html = loginCodeTemplate(code);
     }
 
-    const sent = await sendEmail(emailLower, subject, html);
-    if (!sent) return new Response(JSON.stringify({ error: "Failed to send email - check Worker logs" }), {
+    const result = await sendEmail(emailLower, subject, html);
+    if (!result.ok) return new Response(JSON.stringify({ error: "Failed to send email", detail: result.error }), {
       status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
     });
 

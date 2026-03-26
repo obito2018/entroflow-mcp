@@ -3,7 +3,7 @@ import { Env } from "../lib/types";
 const FROM_EMAIL = "noreply@entroflow.ai";
 const FROM_NAME = "EntroFlow";
 
-export async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+export async function sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("https://api.mailchannels.net/tx/v1/send", {
       method: "POST",
@@ -17,13 +17,11 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.error(`MailChannels error ${res.status}: ${body}`);
-      return false;
+      return { ok: false, error: `MailChannels ${res.status}: ${body}` };
     }
-    return true;
-  } catch (e) {
-    console.error("MailChannels exception:", e);
-    return false;
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
   }
 }
 
