@@ -19,3 +19,7 @@ zone_name = "entroflow.ai"
 [[routes]]
 pattern = "entroflow.ai/v1/*"
 zone_name = "entroflow.ai"
+
+[[routes]]
+pattern = "api.entroflow.ai/*"
+zone_name = "entroflow.ai"
