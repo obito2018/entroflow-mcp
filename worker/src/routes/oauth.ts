@@ -16,6 +16,7 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
       scope: "openid email profile",
       state,
       access_type: "offline",
+      prompt: "select_account",
     });
     return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
   }
