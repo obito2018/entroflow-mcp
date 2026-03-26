@@ -15,8 +15,14 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
         content: [{ type: "text/html", value: html }],
       }),
     });
-    return res.status === 202 || res.status === 200;
-  } catch {
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`MailChannels error ${res.status}: ${body}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("MailChannels exception:", e);
     return false;
   }
 }
