@@ -9,6 +9,39 @@ async function requireAdmin(request: Request, env: Env): Promise<{ id: string; r
   return { id: payload.sub, role: payload.role };
 }
 
+// Regenerate catalog.json in R2 from published platforms in D1
+async function syncCatalogToR2(env: Env): Promise<void> {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, name_en, name_zh, aliases FROM hardware_platforms WHERE status = 'published' ORDER BY name_en ASC"
+    ).all();
+
+    const platforms = results.map((p: any) => {
+      let aliases: string[] = [];
+      if (p.aliases) {
+        try { aliases = JSON.parse(p.aliases); } catch { aliases = []; }
+      }
+      const entry: any = {
+        id: p.id,
+        display_name: p.name_en,
+        aliases: [p.id, p.name_en, ...(p.name_zh ? [p.name_zh] : []), ...aliases]
+          .filter(Boolean)
+          .filter((v, i, arr) => arr.indexOf(v) === i), // deduplicate
+      };
+      if (p.name_zh) entry.display_name_zh = p.name_zh;
+      return entry;
+    });
+
+    const catalog = JSON.stringify({ platforms }, null, 2);
+    await env.ASSETS.put("catalog.json", catalog, {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch (e) {
+    // Non-fatal: log but don't fail the request
+    console.error("Failed to sync catalog.json:", e);
+  }
+}
+
 export async function handleAdminRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
   // POST /v1/admin/auth/login
@@ -96,6 +129,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       await env.DB.prepare(
         "INSERT INTO hardware_platforms (id, name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(id.trim(), name_en.trim(), name_zh || null, aliasesJson, description_en || null, description_zh || null, logo_url || null, website_url || null, status, admin.id, admin.id, ts, ts).run();
+      if (status === "published") await syncCatalogToR2(env);
       return jsonResponse({ success: true }, 201);
     }
   }
@@ -113,11 +147,13 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       await env.DB.prepare(
         "UPDATE hardware_platforms SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), aliases=COALESCE(?,aliases), description_en=COALESCE(?,description_en), description_zh=COALESCE(?,description_zh), logo_url=COALESCE(?,logo_url), website_url=COALESCE(?,website_url), status=COALESCE(?,status), updated_by=?, updated_at=? WHERE id=?"
       ).bind(name_en||null, name_zh||null, aliasesJson, description_en||null, description_zh||null, logo_url||null, website_url||null, status||null, admin.id, now(), id).run();
+      await syncCatalogToR2(env);
       return jsonResponse({ success: true });
     }
     if (request.method === "DELETE") {
       if (admin.role !== "super") return forbidden("Super admin required");
       await env.DB.prepare("DELETE FROM hardware_platforms WHERE id = ?").bind(id).run();
+      await syncCatalogToR2(env);
       return jsonResponse({ success: true });
     }
   }
