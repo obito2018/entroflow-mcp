@@ -357,6 +357,27 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
     return jsonResponse({ id }, 201);
   }
 
+  // PUT /v1/admin/docs/sections/:id
+  const docSectionById = path.match(/^\/v1\/admin\/docs\/sections\/([^/]+)$/);
+  if (docSectionById) {
+    const id = docSectionById[1];
+    if (request.method === "PUT") {
+      let body: any;
+      try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
+      const { title_en, title_zh, sort_order } = body;
+      await env.DB.prepare(
+        "UPDATE doc_sections SET title_en=COALESCE(?,title_en), title_zh=COALESCE(?,title_zh), sort_order=COALESCE(?,sort_order) WHERE id=?"
+      ).bind(title_en||null, title_zh||null, sort_order!=null?sort_order:null, id).run();
+      return jsonResponse({ success: true });
+    }
+    if (request.method === "DELETE") {
+      // Delete all items in section first
+      await env.DB.prepare("DELETE FROM doc_items WHERE section_id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM doc_sections WHERE id = ?").bind(id).run();
+      return jsonResponse({ success: true });
+    }
+  }
+
   if (path === "/v1/admin/docs/items" && request.method === "POST") {
     let body: any;
     try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
