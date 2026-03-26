@@ -46,6 +46,9 @@ export async function handleAuthRoutes(path: string, request: Request, env: Env)
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) return unauthorized("Invalid email or password");
 
+    // Update last_login_at
+    await env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now(), user.id).run();
+
     const token = await signJwt({ sub: user.id, email: user.email, provider: "email" }, env.JWT_SECRET);
     return jsonResponse({ token, user: { id: user.id, email: user.email, name: user.name, provider: "email" } });
   }

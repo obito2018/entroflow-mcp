@@ -65,8 +65,8 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
       if (existing) {
         userId = existing.id;
         await env.DB.prepare(
-          "UPDATE users SET name=?, avatar_url=?, updated_at=? WHERE id=?"
-        ).bind(userInfo.name || null, userInfo.picture || null, ts, userId).run();
+          "UPDATE users SET name=?, avatar_url=?, last_login_at=?, updated_at=? WHERE id=?"
+        ).bind(userInfo.name || null, userInfo.picture || null, ts, ts, userId).run();
       } else {
         // Check if email already registered with different provider
         const byEmail = await env.DB.prepare(
@@ -77,8 +77,8 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
           // Link Google to existing account
           userId = byEmail.id;
           await env.DB.prepare(
-            "UPDATE users SET provider_id=?, avatar_url=?, updated_at=? WHERE id=?"
-          ).bind(userInfo.id, userInfo.picture || null, ts, userId).run();
+            "UPDATE users SET provider_id=?, avatar_url=?, last_login_at=?, updated_at=? WHERE id=?"
+          ).bind(userInfo.id, userInfo.picture || null, ts, ts, userId).run();
         } else {
           userId = uuid();
           await env.DB.prepare(
@@ -172,8 +172,8 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
       if (existing) {
         userId = existing.id;
         await env.DB.prepare(
-          "UPDATE users SET name=?, avatar_url=?, updated_at=? WHERE id=?"
-        ).bind(userInfo.name || userInfo.login, userInfo.avatar_url || null, ts, userId).run();
+          "UPDATE users SET name=?, avatar_url=?, last_login_at=?, updated_at=? WHERE id=?"
+        ).bind(userInfo.name || userInfo.login, userInfo.avatar_url || null, ts, ts, userId).run();
       } else {
         const byEmail = await env.DB.prepare(
           "SELECT id FROM users WHERE email = ?"
@@ -182,8 +182,8 @@ export async function handleOAuthRoutes(path: string, request: Request, env: Env
         if (byEmail) {
           userId = byEmail.id;
           await env.DB.prepare(
-            "UPDATE users SET provider_id=?, avatar_url=?, updated_at=? WHERE id=?"
-          ).bind(String(userInfo.id), userInfo.avatar_url || null, ts, userId).run();
+            "UPDATE users SET provider_id=?, avatar_url=?, last_login_at=?, updated_at=? WHERE id=?"
+          ).bind(String(userInfo.id), userInfo.avatar_url || null, ts, ts, userId).run();
         } else {
           userId = uuid();
           await env.DB.prepare(

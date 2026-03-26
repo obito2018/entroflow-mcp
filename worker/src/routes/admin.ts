@@ -72,13 +72,14 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
 
   // GET /v1/admin/stats
   if (path === "/v1/admin/stats" && request.method === "GET") {
-    const [devices, platforms, downloads, feedbackNew, businessNew, users] = await Promise.all([
+    const [devices, platforms, downloads, feedbackNew, businessNew, users, installIds] = await Promise.all([
       env.DB.prepare("SELECT COUNT(*) as c FROM devices").first<{ c: number }>(),
       env.DB.prepare("SELECT COUNT(*) as c FROM hardware_platforms").first<{ c: number }>(),
       env.DB.prepare("SELECT COUNT(*) as c FROM download_logs").first<{ c: number }>(),
       env.DB.prepare("SELECT COUNT(*) as c FROM feedback WHERE status = 'new'").first<{ c: number }>(),
       env.DB.prepare("SELECT COUNT(*) as c FROM business_inquiries WHERE status = 'new'").first<{ c: number }>(),
       env.DB.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>(),
+      env.DB.prepare("SELECT COUNT(DISTINCT install_id) as c FROM download_logs WHERE install_id IS NOT NULL").first<{ c: number }>(),
     ]);
     return jsonResponse({
       devices_total: devices?.c ?? 0,
@@ -87,7 +88,73 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       feedback_new: feedbackNew?.c ?? 0,
       business_new: businessNew?.c ?? 0,
       users_total: users?.c ?? 0,
+      install_ids_total: installIds?.c ?? 0,
     });
+  }
+
+  // ── User Management ──────────────────────────────────────────────────────
+
+  if (path === "/v1/admin/users" && request.method === "GET") {
+    const url = new URL(request.url);
+    const search = url.searchParams.get("search") || "";
+    const provider = url.searchParams.get("provider") || "";
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    let where = "1=1";
+    const bindings: unknown[] = [];
+    if (search) { where += " AND (u.email LIKE ? OR u.name LIKE ?)"; bindings.push(`%${search}%`, `%${search}%`); }
+    if (provider) { where += " AND u.provider = ?"; bindings.push(provider); }
+
+    const [items, count] = await Promise.all([
+      env.DB.prepare(`
+        SELECT
+          u.id, u.email, u.name, u.provider, u.avatar_url,
+          u.created_at, u.last_login_at,
+          COUNT(DISTINCT dl.id) as downloads_total,
+          COUNT(DISTINCT dl.device_id) as devices_downloaded,
+          COUNT(DISTINCT d.platform_id) as platforms_downloaded,
+          MAX(dl.created_at) as last_download_at
+        FROM users u
+        LEFT JOIN download_logs dl ON dl.user_id = u.id
+        LEFT JOIN devices d ON d.id = dl.device_id
+        WHERE ${where}
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+        LIMIT ? OFFSET ?
+      `).bind(...bindings, limit, offset).all(),
+      env.DB.prepare(`SELECT COUNT(*) as c FROM users u WHERE ${where}`).bind(...bindings).first<{ c: number }>(),
+    ]);
+    return jsonResponse({ items: items.results, total: count?.c ?? 0, page, limit });
+  }
+
+  // GET /v1/admin/install-ids
+  if (path === "/v1/admin/install-ids" && request.method === "GET") {
+    const url = new URL(request.url);
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    const [items, count] = await Promise.all([
+      env.DB.prepare(`
+        SELECT
+          dl.install_id,
+          COUNT(DISTINCT dl.id) as downloads_total,
+          COUNT(DISTINCT dl.device_id) as devices_downloaded,
+          COUNT(DISTINCT d.platform_id) as platforms_downloaded,
+          MIN(dl.created_at) as first_seen_at,
+          MAX(dl.created_at) as last_seen_at
+        FROM download_logs dl
+        LEFT JOIN devices d ON d.id = dl.device_id
+        WHERE dl.install_id IS NOT NULL
+        GROUP BY dl.install_id
+        ORDER BY last_seen_at DESC
+        LIMIT ? OFFSET ?
+      `).bind(limit, offset).all(),
+      env.DB.prepare("SELECT COUNT(DISTINCT install_id) as c FROM download_logs WHERE install_id IS NOT NULL").first<{ c: number }>(),
+    ]);
+    return jsonResponse({ items: items.results, total: count?.c ?? 0, page, limit });
   }
 
   // ── Platform Management ──────────────────────────────────────────────────
