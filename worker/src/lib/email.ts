@@ -1,23 +1,29 @@
-import { Env } from "../lib/types";
-
 const FROM_EMAIL = "noreply@entroflow.ai";
 const FROM_NAME = "EntroFlow";
 
-export async function sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  apiKey: string
+): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch("https://api.mailchannels.net/tx/v1/send", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from: { email: FROM_EMAIL, name: FROM_NAME },
+        from: `${FROM_NAME} <${FROM_EMAIL}>`,
+        to: [to],
         subject,
-        content: [{ type: "text/html", value: html }],
+        html,
       }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { ok: false, error: `MailChannels ${res.status}: ${body}` };
+      return { ok: false, error: `Resend ${res.status}: ${body}` };
     }
     return { ok: true };
   } catch (e: any) {
