@@ -1,5 +1,5 @@
 import { Env } from "../lib/types";
-import { jsonResponse, badRequest, unauthorized, uuid, now, signJwt, verifyJwt, hashPassword, verifyPassword, getAuthToken } from "../lib/utils";
+import { jsonResponse, badRequest, unauthorized, uuid, now, signJwt, verifyJwt, hashPassword, verifyPassword, getAuthToken, serverError } from "../lib/utils";
 
 export async function handleAuthRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
@@ -24,6 +24,7 @@ export async function handleAuthRoutes(path: string, request: Request, env: Env)
       "INSERT INTO users (id, email, name, provider, password_hash, email_verified, created_at, updated_at) VALUES (?, ?, ?, 'email', ?, 0, ?, ?)"
     ).bind(id, email.toLowerCase(), name.trim(), hash, ts, ts).run();
 
+    if (!env.JWT_SECRET) return serverError("JWT_SECRET not configured");
     const token = await signJwt({ sub: id, email: email.toLowerCase(), provider: "email" }, env.JWT_SECRET);
     return jsonResponse({ token, user: { id, email: email.toLowerCase(), name: name.trim(), provider: "email" } }, 201);
   }
