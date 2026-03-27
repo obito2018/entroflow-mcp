@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS hardware_platforms (
   id             TEXT PRIMARY KEY,
   name_en        TEXT NOT NULL,
   name_zh        TEXT,
+  sort_order     INTEGER NOT NULL DEFAULT 0,
   aliases        TEXT,
   description_en TEXT,
   description_zh TEXT,

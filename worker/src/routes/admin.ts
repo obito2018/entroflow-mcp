@@ -30,7 +30,7 @@ async function syncDeviceList(platformId: string, env: Env): Promise<void> {
 async function syncCatalogToR2(env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
-      "SELECT id, name_en, name_zh, aliases FROM hardware_platforms WHERE status = 'published' ORDER BY name_en ASC"
+      "SELECT id, name_en, name_zh, aliases FROM hardware_platforms WHERE status = 'published' ORDER BY sort_order ASC, name_en ASC"
     ).all();
 
     const platforms = results.map((p: any) => {
@@ -56,6 +56,72 @@ async function syncCatalogToR2(env: Env): Promise<void> {
   } catch (e) {
     // Non-fatal: log but don't fail the request
     console.error("Failed to sync catalog.json:", e);
+  }
+}
+
+async function publishAssetCopy(sourceKey: string | null | undefined, targetKey: string, contentType: string, env: Env): Promise<void> {
+  if (!sourceKey) return;
+  const obj = await env.ASSETS.get(sourceKey);
+  if (!obj) {
+    console.warn(`Source asset not found for publish: ${sourceKey}`);
+    return;
+  }
+  await env.ASSETS.put(targetKey, await obj.arrayBuffer(), {
+    httpMetadata: { contentType },
+  });
+}
+
+async function syncDeviceVersionAssets(deviceId: string, versionId: string, env: Env): Promise<void> {
+  try {
+    const row = await env.DB.prepare(`
+      SELECT
+        d.product_id,
+        d.platform_id,
+        dv.version,
+        dv.is_latest,
+        dv.zip_r2_key,
+        dv.action_specs_r2_key
+      FROM devices d
+      INNER JOIN device_versions dv ON dv.device_id = d.id
+      WHERE d.id = ? AND dv.id = ?
+    `).bind(deviceId, versionId).first<{
+      product_id: string;
+      platform_id: string;
+      version: string;
+      is_latest: number;
+      zip_r2_key: string | null;
+      action_specs_r2_key: string | null;
+    }>();
+
+    if (!row) return;
+
+    if (row.zip_r2_key) {
+      await publishAssetCopy(
+        row.zip_r2_key,
+        `platforms/${row.platform_id}/devices/${row.product_id}/v${row.version}.zip`,
+        "application/zip",
+        env
+      );
+    }
+
+    if (row.action_specs_r2_key) {
+      await publishAssetCopy(
+        row.action_specs_r2_key,
+        `platforms/${row.platform_id}/devices/${row.product_id}/action_specs.md`,
+        "text/markdown; charset=utf-8",
+        env
+      );
+    }
+
+    if (row.is_latest) {
+      await env.ASSETS.put(
+        `platforms/${row.platform_id}/devices/${row.product_id}/latest.json`,
+        JSON.stringify({ version: row.version }),
+        { httpMetadata: { contentType: "application/json" } }
+      );
+    }
+  } catch (e) {
+    console.error("Failed to sync device version assets:", e);
   }
 }
 
@@ -191,7 +257,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       if (status) { where += " AND status = ?"; bindings.push(status); }
 
       const [items, count] = await Promise.all([
-        env.DB.prepare(`SELECT * FROM hardware_platforms WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...bindings, limit, offset).all(),
+        env.DB.prepare(`SELECT * FROM hardware_platforms WHERE ${where} ORDER BY sort_order ASC, created_at DESC LIMIT ? OFFSET ?`).bind(...bindings, limit, offset).all(),
         env.DB.prepare(`SELECT COUNT(*) as c FROM hardware_platforms WHERE ${where}`).bind(...bindings).first<{ c: number }>(),
       ]);
       return jsonResponse({ items: items.results, total: count?.c ?? 0, page, limit });
@@ -200,7 +266,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
     if (request.method === "POST") {
       let body: any;
       try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
-      const { id, name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status = "draft" } = body;
+      const { id, name_en, name_zh, sort_order = 0, aliases, description_en, description_zh, logo_url, website_url, status = "draft" } = body;
       if (!id?.trim()) return badRequest("id is required");
       if (!name_en?.trim()) return badRequest("name_en is required");
 
@@ -211,8 +277,8 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
 
       const ts = now();
       await env.DB.prepare(
-        "INSERT INTO hardware_platforms (id, name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).bind(id.trim(), name_en.trim(), name_zh || null, aliasesJson, description_en || null, description_zh || null, logo_url || null, website_url || null, status, admin.id, admin.id, ts, ts).run();
+        "INSERT INTO hardware_platforms (id, name_en, name_zh, sort_order, aliases, description_en, description_zh, logo_url, website_url, status, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(id.trim(), name_en.trim(), name_zh || null, Number(sort_order) || 0, aliasesJson, description_en || null, description_zh || null, logo_url || null, website_url || null, status, admin.id, admin.id, ts, ts).run();
       if (status === "published") await syncCatalogToR2(env);
       return jsonResponse({ success: true }, 201);
     }
@@ -224,13 +290,13 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
     if (request.method === "PUT") {
       let body: any;
       try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
-      const { name_en, name_zh, aliases, description_en, description_zh, logo_url, website_url, status } = body;
+      const { name_en, name_zh, sort_order, aliases, description_en, description_zh, logo_url, website_url, status } = body;
       const aliasesJson = aliases !== undefined
         ? JSON.stringify(Array.isArray(aliases) ? aliases : aliases.split(',').map((s: string) => s.trim()).filter(Boolean))
         : null;
       await env.DB.prepare(
-        "UPDATE hardware_platforms SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), aliases=COALESCE(?,aliases), description_en=COALESCE(?,description_en), description_zh=COALESCE(?,description_zh), logo_url=COALESCE(?,logo_url), website_url=COALESCE(?,website_url), status=COALESCE(?,status), updated_by=?, updated_at=? WHERE id=?"
-      ).bind(name_en||null, name_zh||null, aliasesJson, description_en||null, description_zh||null, logo_url||null, website_url||null, status||null, admin.id, now(), id).run();
+        "UPDATE hardware_platforms SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), sort_order=COALESCE(?,sort_order), aliases=COALESCE(?,aliases), description_en=COALESCE(?,description_en), description_zh=COALESCE(?,description_zh), logo_url=COALESCE(?,logo_url), website_url=COALESCE(?,website_url), status=COALESCE(?,status), updated_by=?, updated_at=? WHERE id=?"
+      ).bind(name_en||null, name_zh||null, sort_order!=null ? Number(sort_order) : null, aliasesJson, description_en||null, description_zh||null, logo_url||null, website_url||null, status||null, admin.id, now(), id).run();
       await syncCatalogToR2(env);
       return jsonResponse({ success: true });
     }
@@ -375,11 +441,45 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
         "INSERT INTO device_versions (id, device_id, version, is_latest, zip_r2_key, action_specs_r2_key, readme_r2_key, published_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(id, deviceId, version.trim(), is_latest?1:0, zip_r2_key||null, action_specs_r2_key||null, readme_r2_key||null, ts, admin.id, ts).run();
 
+      await syncDeviceVersionAssets(deviceId, id, env);
+
       // Sync device list for the platform
       const device = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(deviceId).first<{ platform_id: string }>();
       if (device) await syncDeviceList(device.platform_id, env);
 
       return jsonResponse({ id }, 201);
+    }
+  }
+
+  const deviceVersionById = path.match(/^\/v1\/admin\/devices\/([^/]+)\/versions\/([^/]+)$/);
+  if (deviceVersionById) {
+    const [, deviceId, versionId] = deviceVersionById;
+    if (request.method === "PUT") {
+      let body: any;
+      try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
+      const { zip_r2_key, action_specs_r2_key, readme_r2_key, is_latest } = body;
+
+      if (is_latest) {
+        await env.DB.prepare("UPDATE device_versions SET is_latest = 0 WHERE device_id = ?").bind(deviceId).run();
+      }
+
+      await env.DB.prepare(
+        "UPDATE device_versions SET zip_r2_key=COALESCE(?,zip_r2_key), action_specs_r2_key=COALESCE(?,action_specs_r2_key), readme_r2_key=COALESCE(?,readme_r2_key), is_latest=COALESCE(?,is_latest) WHERE id=? AND device_id=?"
+      ).bind(
+        zip_r2_key || null,
+        action_specs_r2_key || null,
+        readme_r2_key || null,
+        is_latest != null ? (is_latest ? 1 : 0) : null,
+        versionId,
+        deviceId
+      ).run();
+
+      await syncDeviceVersionAssets(deviceId, versionId, env);
+
+      const device = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(deviceId).first<{ platform_id: string }>();
+      if (device) await syncDeviceList(device.platform_id, env);
+
+      return jsonResponse({ success: true });
     }
   }
 

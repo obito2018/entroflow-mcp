@@ -29,14 +29,14 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
     const lang = url.searchParams.get("lang") || "en";
     const { results } = await env.DB.prepare(`
       SELECT
-        p.id, p.name_en, p.name_zh, p.description_en, p.description_zh,
+        p.id, p.name_en, p.name_zh, p.sort_order, p.description_en, p.description_zh,
         p.logo_url, p.website_url,
         COUNT(d.id) as device_count
       FROM hardware_platforms p
       LEFT JOIN devices d ON d.platform_id = p.id AND d.status = 'published'
       WHERE p.status = 'published'
       GROUP BY p.id
-      ORDER BY p.name_en ASC
+      ORDER BY p.sort_order ASC, p.name_en ASC
     `).all();
     return jsonResponse(results);
   }
