@@ -9,6 +9,40 @@ async function requireAdmin(request: Request, env: Env): Promise<{ id: string; r
   return { id: payload.sub, role: payload.role };
 }
 
+function normalizeAliases(input: unknown, depth = 0): string[] {
+  if (input == null || depth > 8) return [];
+
+  if (Array.isArray(input)) {
+    const flattened = input.flatMap((item) => normalizeAliases(item, depth + 1));
+    return flattened.filter((value, index, arr) => value && arr.indexOf(value) === index);
+  }
+
+  if (typeof input !== "string") {
+    return [];
+  }
+
+  const trimmed = input.trim();
+  if (!trimmed) return [];
+
+  if (
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+  ) {
+    try {
+      return normalizeAliases(JSON.parse(trimmed), depth + 1);
+    } catch {
+      // Fall through to plain-text normalization.
+    }
+  }
+
+  const values = trimmed
+    .split(/[，,]/)
+    .map((value) => value.trim().replace(/^[\s"'[\]\\]+|[\s"'[\]\\]+$/g, "").trim())
+    .filter(Boolean);
+
+  return values.filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
 // Auto-generate {platform}_devices.json from D1 device/version data
 async function syncDeviceList(platformId: string, env: Env): Promise<void> {
   try {
@@ -34,10 +68,7 @@ async function syncCatalogToR2(env: Env): Promise<void> {
     ).all();
 
     const platforms = results.map((p: any) => {
-      let aliases: string[] = [];
-      if (p.aliases) {
-        try { aliases = JSON.parse(p.aliases); } catch { aliases = []; }
-      }
+      const aliases = normalizeAliases(p.aliases);
       const entry: any = {
         id: p.id,
         display_name: p.name_en,
@@ -260,7 +291,11 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
         env.DB.prepare(`SELECT * FROM hardware_platforms WHERE ${where} ORDER BY sort_order ASC, created_at DESC LIMIT ? OFFSET ?`).bind(...bindings, limit, offset).all(),
         env.DB.prepare(`SELECT COUNT(*) as c FROM hardware_platforms WHERE ${where}`).bind(...bindings).first<{ c: number }>(),
       ]);
-      return jsonResponse({ items: items.results, total: count?.c ?? 0, page, limit });
+      const normalizedItems = items.results.map((item: any) => ({
+        ...item,
+        aliases: normalizeAliases(item.aliases),
+      }));
+      return jsonResponse({ items: normalizedItems, total: count?.c ?? 0, page, limit });
     }
 
     if (request.method === "POST") {
@@ -271,9 +306,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       if (!name_en?.trim()) return badRequest("name_en is required");
 
       // aliases can be array or comma-separated string — normalize to JSON array string
-      const aliasesJson = aliases
-        ? JSON.stringify(Array.isArray(aliases) ? aliases : aliases.split(',').map((s: string) => s.trim()).filter(Boolean))
-        : null;
+      const aliasesJson = aliases ? JSON.stringify(normalizeAliases(aliases)) : null;
 
       const ts = now();
       await env.DB.prepare(
@@ -292,7 +325,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
       const { name_en, name_zh, sort_order, aliases, description_en, description_zh, logo_url, website_url, status } = body;
       const aliasesJson = aliases !== undefined
-        ? JSON.stringify(Array.isArray(aliases) ? aliases : aliases.split(',').map((s: string) => s.trim()).filter(Boolean))
+        ? JSON.stringify(normalizeAliases(aliases))
         : null;
       await env.DB.prepare(
         "UPDATE hardware_platforms SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), sort_order=COALESCE(?,sort_order), aliases=COALESCE(?,aliases), description_en=COALESCE(?,description_en), description_zh=COALESCE(?,description_zh), logo_url=COALESCE(?,logo_url), website_url=COALESCE(?,website_url), status=COALESCE(?,status), updated_by=?, updated_at=? WHERE id=?"
