@@ -158,11 +158,17 @@ export async function handleAssetRoutes(path: string, request: Request, env: Env
     });
   }
 
-  // GET /api/platforms/{platform}/mihome_devices.json
-  const platformDeviceList = path.match(/^\/api\/platforms\/([^/]+)\/mihome_devices\.json$/);
+  // GET /api/platforms/{platform}/{platform}_devices.json
+  const platformDeviceList = path.match(/^\/api\/platforms\/([^/]+)\/([^/]+_devices\.json)$/);
   if (platformDeviceList) {
     const platform = platformDeviceList[1];
-    const obj = await env.ASSETS.get(`platforms/${platform}/mihome_devices.json`);
+    const requestedFile = platformDeviceList[2];
+    const expectedFile = `${platform}_devices.json`;
+    if (requestedFile !== expectedFile) {
+      return notFound(`Device list for '${platform}' not found`);
+    }
+
+    const obj = await env.ASSETS.get(`platforms/${platform}/${expectedFile}`);
     if (!obj) return notFound(`Device list for '${platform}' not found`);
     return new Response(await obj.text(), {
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-cache" },

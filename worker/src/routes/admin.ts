@@ -9,7 +9,7 @@ async function requireAdmin(request: Request, env: Env): Promise<{ id: string; r
   return { id: payload.sub, role: payload.role };
 }
 
-// Auto-generate mihome_devices.json from R2 device directories
+// Auto-generate {platform}_devices.json from D1 device/version data
 async function syncDeviceList(platformId: string, env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
@@ -20,7 +20,7 @@ async function syncDeviceList(platformId: string, env: Env): Promise<void> {
 
     const devices = results.map((r: any) => ({ model: r.product_id }));
     const json = JSON.stringify(devices, null, 2);
-    await env.ASSETS.put(`platforms/${platformId}/mihome_devices.json`, json, {
+    await env.ASSETS.put(`platforms/${platformId}/${platformId}_devices.json`, json, {
       httpMetadata: { contentType: "application/json" },
     });
   } catch (e) {
@@ -280,6 +280,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       await env.DB.prepare(
         "INSERT INTO devices (id, product_id, name_en, name_zh, platform_id, detail_image_url, github_url, is_featured, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(id, product_id.trim(), name_en.trim(), name_zh||null, platform_id.trim(), detail_image_url||null, github_url||null, is_featured?1:0, status, admin.id, ts, ts).run();
+      await syncDeviceList(platform_id.trim(), env);
       return jsonResponse({ id }, 201);
     }
   }
@@ -291,15 +292,21 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       let body: any;
       try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
       const { name_en, name_zh, platform_id, detail_image_url, github_url, is_featured, status } = body;
+      const before = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(id).first<{ platform_id: string }>();
       await env.DB.prepare(
         "UPDATE devices SET name_en=COALESCE(?,name_en), name_zh=COALESCE(?,name_zh), platform_id=COALESCE(?,platform_id), detail_image_url=COALESCE(?,detail_image_url), github_url=COALESCE(?,github_url), is_featured=COALESCE(?,is_featured), status=COALESCE(?,status), updated_at=? WHERE id=?"
       ).bind(name_en||null, name_zh||null, platform_id||null, detail_image_url||null, github_url||null, is_featured!=null?is_featured:null, status||null, now(), id).run();
+      const after = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(id).first<{ platform_id: string }>();
+      if (before?.platform_id) await syncDeviceList(before.platform_id, env);
+      if (after?.platform_id && after.platform_id !== before?.platform_id) await syncDeviceList(after.platform_id, env);
       return jsonResponse({ success: true });
     }
     if (request.method === "DELETE") {
       if (admin.role !== "super") return forbidden("Super admin required");
+      const device = await env.DB.prepare("SELECT platform_id FROM devices WHERE id = ?").bind(id).first<{ platform_id: string }>();
       await env.DB.prepare("DELETE FROM device_versions WHERE device_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(id).run();
+      if (device?.platform_id) await syncDeviceList(device.platform_id, env);
       return jsonResponse({ success: true });
     }
   }
