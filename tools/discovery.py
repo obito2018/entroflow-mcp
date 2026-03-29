@@ -11,7 +11,7 @@ def device_discover(platform: str) -> str:
     需先完成登录。纯本地匹配，不联网。"""
     try:
         connector = loader.load_connector(platform)
-        user_devices = connector.list_mihome_devices()
+        user_devices = loader.list_connector_devices(connector)
     except Exception as e:
         return f"拉取设备列表失败: {e}"
 

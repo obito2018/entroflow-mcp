@@ -79,6 +79,10 @@ def _platforms_for_listing(explicit_platform: str | None) -> list[str]:
     return discovered
 
 
+def _connector_list_devices(connector):
+    return loader.list_connector_devices(connector)
+
+
 def cmd_list_platforms(args: argparse.Namespace) -> int:
     _refresh_catalog()
     catalog = _load_catalog()
@@ -205,7 +209,7 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
     for platform in platforms:
         try:
             connector = loader.load_connector(platform)
-            user_devices = connector.list_mihome_devices()
+            user_devices = _connector_list_devices(connector)
             supported_models = loader.load_platform_devices(platform)
         except Exception as exc:
             _print(f"[{platform}] Failed to list devices: {exc}")
@@ -268,7 +272,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         raise RuntimeError("Setup requires --name, --location, and --remark.")
 
     connector = loader.load_connector(platform)
-    user_devices = connector.list_mihome_devices()
+    user_devices = _connector_list_devices(connector)
     discovered = next((item for item in user_devices if str(item.get("did")) == str(did)), None)
     if not discovered:
         raise RuntimeError(

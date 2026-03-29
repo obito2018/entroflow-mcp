@@ -8,6 +8,15 @@ ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 CATALOG_FILE = ASSETS_DIR / "catalog.json"
 
 
+def _connector_entry_exists(connector_dir: Path, platform_id: str) -> bool:
+    candidates = [
+        connector_dir / "client.py",
+        connector_dir / f"{platform_id}_client.py",
+        connector_dir / "mihome_client.py",
+    ]
+    return any(path.exists() for path in candidates)
+
+
 def _load_catalog() -> list:
     """读取平台目录，返回 platforms 列表。"""
     if not CATALOG_FILE.exists():
@@ -45,7 +54,7 @@ def platform_install(platform: str) -> str:
     devices_file = connector_dir / f"{platform_id}_devices.json"
 
     # 已安装且完整，跳过
-    if connector_dir.exists() and devices_file.exists() and any(connector_dir.glob("*_client.py")):
+    if connector_dir.exists() and devices_file.exists() and _connector_entry_exists(connector_dir, platform_id):
         return f"平台 '{platform_id}' 已就绪。"
 
     try:
