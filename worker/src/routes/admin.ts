@@ -530,7 +530,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       httpMetadata: { contentType: file.type || "application/octet-stream" },
     });
 
-    const url = `https://entroflow.ai/api/uploads/${key}`;
+    const url = `https://api.entroflow.ai/api/uploads/${key}`;
     return jsonResponse({ url, r2_key: key }, 201);
   }
 
