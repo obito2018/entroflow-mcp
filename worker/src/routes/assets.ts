@@ -247,20 +247,17 @@ export async function handleAssetRoutes(path: string, request: Request, env: Env
     const obj = await env.ASSETS.get(`platforms/${platform}/devices/${model}/v${version}.zip`);
     if (!obj) return notFound(`Device '${model}' v${version} not found`);
 
-    // Record download log (non-fatal) — only for MCP/CLI, not web (web is counted in download.ts)
+    // Record download log (non-fatal) — only for MCP/CLI (install_id present), not web downloads
     try {
       const url = new URL(request.url);
       const install_id = url.searchParams.get("install_id") || null;
-      const auth = request.headers.get("Authorization") || null;
-      // Skip counting if this is a web download (has auth token — already counted in download.ts)
-      if (!auth) {
-        const channel = install_id ? "mcp" : "cli";
+      if (install_id) {
         const device = await env.DB.prepare("SELECT id FROM devices WHERE product_id = ?").bind(model).first<{ id: string }>();
         if (device) {
           const ip = request.headers.get("CF-Connecting-IP") || "";
           await env.DB.prepare(
             "INSERT INTO download_logs (id, device_id, version, channel, install_id, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-          ).bind(uuid(), device.id, version, channel, install_id, ip, now()).run();
+          ).bind(uuid(), device.id, version, "mcp", install_id, ip, now()).run();
           await env.DB.prepare("UPDATE devices SET downloads_count = downloads_count + 1 WHERE id = ?").bind(device.id).run();
         }
       }
