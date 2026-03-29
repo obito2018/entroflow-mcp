@@ -9,6 +9,7 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   RESEND_API_KEY: string;
+  INTERNAL_PUBLISH_SECRET?: string;
 }
 
 export interface JwtPayload {

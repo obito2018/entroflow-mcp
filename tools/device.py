@@ -3,10 +3,13 @@ from core import loader, store
 
 
 def device_search(query: str) -> str:
-    """搜索已注册设备。传 'all' 返回全部，或传关键词匹配名称/型号/位置。"""
+    """Search registered devices. Use 'all' to list everything."""
     devices = store.load()
     if not devices:
-        return "没有已注册的设备。请先使用 platform_install 安装平台包并完成设备注册。"
+        return (
+            "No devices are registered yet. "
+            "Connect a platform and run `entroflow setup ...` before using runtime tools."
+        )
 
     if query.lower() == "all":
         matched = devices
@@ -21,9 +24,9 @@ def device_search(query: str) -> str:
         ]
 
     if not matched:
-        return f"没有找到匹配 '{query}' 的设备。"
+        return f"No registered devices matched '{query}'."
 
-    lines = [f"找到 {len(matched)} 个设备：\n"]
+    lines = [f"Found {len(matched)} device(s):", ""]
     for i, d in enumerate(matched, 1):
         lines.append(f"[{i}] {d.get('name', '?')}")
         lines.append(f"    device_id : {d.get('device_id', '?')}")
@@ -48,52 +51,67 @@ def device_search(query: str) -> str:
 
 
 def device_status(device_id: str) -> str:
-    """查询设备当前状态，返回属性值（开关、音量、亮度、温度等）。只读操作。"""
+    """Read the current status of a registered device."""
     record = store.find(device_id)
     if not record:
-        return f"设备 '{device_id}' 未找到。请先用 device_search 查看已注册设备。"
+        return f"Device '{device_id}' was not found. Use device_search first."
     try:
         device = loader.create_device_instance(record)
         result = device.query_status()
-        return f"设备: {record.get('name', '?')} ({device_id})\n{result}"
+        return f"Device: {record.get('name', '?')} ({device_id})\n{result}"
     except Exception as e:
-        return f"查询状态失败: {e}"
+        return f"Failed to query device status: {e}"
 
 
-def device_control(device_id: str, actions: list) -> str:
-    """对已注册设备执行控制指令。action 和可用参数见 device_search 返回的 supported_actions。"""
+def device_control(device_id: str, action) -> str:
+    """Execute a runtime action on a registered device."""
     record = store.find(device_id)
     if not record:
-        return f"设备 '{device_id}' 未找到。请先用 device_search 查看已注册设备。"
+        return f"Device '{device_id}' was not found. Use device_search first."
     try:
         device = loader.create_device_instance(record)
     except Exception as e:
-        return f"加载设备失败: {e}"
+        return f"Failed to load device runtime: {e}"
 
-    lines = [f"设备: {record.get('name', '?')} ({device_id})", "结果:"]
-    for entry in actions:
-        action = entry.get("action", "")
-        args = entry.get("args", {})
-        if not action:
-            lines.append("  (跳过: 缺少 action 名称)")
+    action_list = action if isinstance(action, list) else [action]
+
+    lines = [f"Device: {record.get('name', '?')} ({device_id})", "Result:"]
+    for entry in action_list:
+        if isinstance(entry, str):
+            action_name = entry
+            args = {}
+        elif isinstance(entry, dict):
+            action_name = entry.get("action", "")
+            args = entry.get("args", {})
+        else:
+            lines.append(f"  (skipped: invalid action payload type {type(entry).__name__})")
             continue
-        result = device.perform_action(action, **args)
-        lines.append(f"  {action}: {result}")
+
+        if not action_name:
+            lines.append("  (skipped: missing action name)")
+            continue
+        if not isinstance(args, dict):
+            lines.append(f"  {action_name}: skipped because args must be an object")
+            continue
+
+        result = device.perform_action(action_name, **args)
+        lines.append(f"  {action_name}: {result}")
     return "\n".join(lines)
 
 
-def device_register(did: str, model: str, platform: str,
-                    name: str, location: str, remark: str) -> str:
-    """将设备写入本地注册表。
-    调用前必须先向用户确认以下三个字段，不得自行填写或使用占位值：
-    - name: 设备昵称（如"客厅大电视"）
-    - location: 设备所在位置（如"客厅"、"主卧"）
-    - remark: 备注信息（如设备用途、外观特征等）
-    did 和 model 从 device_discover 结果中获取，platform 从 platform_list 获取。"""
+def device_register(
+    did: str,
+    model: str,
+    platform: str,
+    name: str,
+    location: str,
+    remark: str,
+) -> str:
+    """Register a device in the local runtime store."""
     if not all([did, model, platform, name, location, remark]):
-        return "缺少必填字段。did、model、platform、name、location、remark 均为必填。"
+        return "Missing required fields: did, model, platform, name, location, remark."
     result = store.register(did, model, platform, name, location, remark)
     if result["ok"]:
-        r = result["record"]
-        return f"设备已注册: {r['name']} ({r['device_id']}) 位置: {r['location']}"
+        record = result["record"]
+        return f"Registered device: {record['name']} ({record['device_id']}) at {record['location']}"
     return result["message"]

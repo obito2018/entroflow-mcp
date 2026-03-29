@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -15,7 +16,7 @@ def _load_module(name: str, file_path: Path):
         return _module_cache[name]
     spec = importlib.util.spec_from_file_location(name, str(file_path))
     if not spec or not spec.loader:
-        raise ImportError(f"无法加载模块: {file_path}")
+        raise ImportError(f"Cannot load module: {file_path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
@@ -26,7 +27,9 @@ def _load_module(name: str, file_path: Path):
 def load_connector(platform: str):
     client_path = ASSETS_DIR / platform / "connector" / "mihome_client.py"
     if not client_path.exists():
-        raise FileNotFoundError(f"平台 '{platform}' 的连接器不存在，请先调用 platform_install。")
+        raise FileNotFoundError(
+            f"Platform '{platform}' is not connected. Run `entroflow connect {platform}` first."
+        )
     mod = _load_module(f"ef_connector_{platform}", client_path)
     if hasattr(mod, "set_runtime_dir"):
         mod.set_runtime_dir(RUNTIME_DIR)
@@ -36,7 +39,9 @@ def load_connector(platform: str):
 def load_device_class(platform: str, model: str):
     device_path = ASSETS_DIR / platform / "devices" / model / f"{model}.py"
     if not device_path.exists():
-        raise FileNotFoundError(f"设备 '{model}' 的驱动不存在，请先调用 device_install。")
+        raise FileNotFoundError(
+            f"Device '{model}' is not set up. Run `entroflow setup --platform {platform} --model {model} ...` first."
+        )
     return _load_module(f"ef_device_{model}", device_path)
 
 
@@ -47,10 +52,10 @@ def create_device_instance(record: Dict[str, Any]):
 
 
 def load_platform_devices(platform: str):
-    """加载平台设备目录文件，返回支持的 model id 集合。"""
-    import json
     devices_path = ASSETS_DIR / platform / "connector" / f"{platform}_devices.json"
     if not devices_path.exists():
-        raise FileNotFoundError(f"平台 '{platform}' 的设备目录不存在，请先调用 platform_install。")
+        raise FileNotFoundError(
+            f"Platform catalog for '{platform}' is missing. Run `entroflow connect {platform}` first."
+        )
     data = json.loads(devices_path.read_text(encoding="utf-8"))
     return {item["model"] for item in data if "model" in item}

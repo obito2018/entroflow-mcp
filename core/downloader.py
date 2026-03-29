@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import io
+import json
 import os
 import zipfile
 from pathlib import Path
@@ -10,6 +11,7 @@ from core.config import get_install_id
 
 API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://api.entroflow.ai/api")
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
+CATALOG_PATH = ASSETS_DIR / "catalog.json"
 
 
 def _params() -> dict:
@@ -74,6 +76,16 @@ def fetch_catalog() -> dict:
     resp = httpx.get(url, params=_params(), timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+def refresh_catalog() -> dict:
+    catalog = fetch_catalog()
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    CATALOG_PATH.write_text(
+        json.dumps(catalog, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return catalog
 
 
 def get_server_latest_version() -> str:

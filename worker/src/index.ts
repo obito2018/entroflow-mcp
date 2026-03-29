@@ -6,7 +6,7 @@ import { handleAuthRoutes } from "./routes/auth";
 import { handleOAuthRoutes } from "./routes/oauth";
 import { handleEmailAuthRoutes } from "./routes/email_auth";
 import { handleDownloadRoutes } from "./routes/download";
-import { handleAdminRoutes } from "./routes/admin";
+import { handleAdminRoutes, handleInternalPublishRoutes } from "./routes/admin";
 import { handleInitRoute } from "./routes/init";
 
 export { Env };
@@ -36,6 +36,11 @@ export default {
       // /v1/admin/* — Admin routes
       if (path.startsWith("/v1/admin/")) {
         const res = await handleAdminRoutes(path, request, env);
+        if (res) return res;
+      }
+
+      if (path.startsWith("/v1/internal/")) {
+        const res = await handleInternalPublishRoutes(path, request, env);
         if (res) return res;
       }
 

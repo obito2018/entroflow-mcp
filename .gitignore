@@ -10,3 +10,6 @@ assets/mihome/
 __pycache__/
 *.pyc
 *.pyo
+
+# Worker dependencies
+worker/node_modules/

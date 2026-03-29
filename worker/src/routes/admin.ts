@@ -1,5 +1,6 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, unauthorized, badRequest, forbidden, uuid, now, signJwt, verifyJwt, hashPassword, verifyPassword, getAuthToken } from "../lib/utils";
+import JSZip from "jszip";
 
 async function requireAdmin(request: Request, env: Env): Promise<{ id: string; role: string } | Response> {
   const token = getAuthToken(request);
@@ -41,6 +42,361 @@ function normalizeAliases(input: unknown, depth = 0): string[] {
     .filter(Boolean);
 
   return values.filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+type PythonLiteral =
+  | string
+  | number
+  | boolean
+  | null
+  | PythonLiteral[]
+  | { [key: string]: PythonLiteral };
+
+class PythonLiteralParser {
+  private index = 0;
+
+  constructor(private readonly input: string) {}
+
+  parseValue(): PythonLiteral {
+    this.skipWhitespace();
+    const ch = this.peek();
+    if (ch === "{") return this.parseDict();
+    if (ch === "[") return this.parseList();
+    if (ch === "'" || ch === "\"") return this.parseString();
+    if (ch === "-" || this.isDigit(ch)) return this.parseNumber();
+    return this.parseIdentifier();
+  }
+
+  private parseDict(): { [key: string]: PythonLiteral } {
+    const result: { [key: string]: PythonLiteral } = {};
+    this.expect("{");
+    this.skipWhitespace();
+    while (this.peek() !== "}") {
+      const rawKey = this.parseValue();
+      const key = typeof rawKey === "string" ? rawKey : String(rawKey);
+      this.skipWhitespace();
+      this.expect(":");
+      result[key] = this.parseValue();
+      this.skipWhitespace();
+      if (this.peek() === ",") {
+        this.index += 1;
+        this.skipWhitespace();
+      } else {
+        break;
+      }
+    }
+    this.expect("}");
+    return result;
+  }
+
+  private parseList(): PythonLiteral[] {
+    const result: PythonLiteral[] = [];
+    this.expect("[");
+    this.skipWhitespace();
+    while (this.peek() !== "]") {
+      result.push(this.parseValue());
+      this.skipWhitespace();
+      if (this.peek() === ",") {
+        this.index += 1;
+        this.skipWhitespace();
+      } else {
+        break;
+      }
+    }
+    this.expect("]");
+    return result;
+  }
+
+  private parseString(): string {
+    const quote = this.peek();
+    this.expect(quote);
+    let value = "";
+    while (this.index < this.input.length) {
+      const ch = this.input[this.index++];
+      if (ch === "\\") {
+        value += this.input[this.index++] ?? "";
+        continue;
+      }
+      if (ch === quote) return value;
+      value += ch;
+    }
+    throw new Error("Unterminated string literal.");
+  }
+
+  private parseNumber(): number {
+    const start = this.index;
+    if (this.peek() === "-") this.index += 1;
+    while (this.isDigit(this.peek())) this.index += 1;
+    if (this.peek() === ".") {
+      this.index += 1;
+      while (this.isDigit(this.peek())) this.index += 1;
+    }
+    const raw = this.input.slice(start, this.index);
+    const num = Number(raw);
+    if (Number.isNaN(num)) throw new Error(`Invalid number literal: ${raw}`);
+    return num;
+  }
+
+  private parseIdentifier(): PythonLiteral {
+    const start = this.index;
+    while (/[A-Za-z0-9_]/.test(this.peek())) this.index += 1;
+    const raw = this.input.slice(start, this.index);
+    if (raw === "True") return true;
+    if (raw === "False") return false;
+    if (raw === "None") return null;
+    if (!raw) throw new Error(`Unexpected token at position ${this.index}.`);
+    return raw;
+  }
+
+  private skipWhitespace() {
+    while (/\s/.test(this.peek())) this.index += 1;
+  }
+
+  private expect(ch: string) {
+    if (this.peek() !== ch) {
+      throw new Error(`Expected '${ch}' at position ${this.index}.`);
+    }
+    this.index += 1;
+  }
+
+  private peek(): string {
+    return this.input[this.index] ?? "";
+  }
+
+  private isDigit(ch: string): boolean {
+    return ch >= "0" && ch <= "9";
+  }
+}
+
+function extractAssignmentCollection(source: string, name: string): string | null {
+  const matcher = new RegExp(`(?:^|\\n)${name}\\s*=\\s*([\\[{])`, "m");
+  const match = matcher.exec(source);
+  if (!match) return null;
+
+  const openChar = match[1];
+  const closeChar = openChar === "[" ? "]" : "}";
+  const start = (match.index ?? 0) + match[0].lastIndexOf(openChar);
+
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === "\"") {
+      quote = ch;
+      continue;
+    }
+    if (ch === openChar) depth += 1;
+    if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function parsePythonAssignment<T extends PythonLiteral>(source: string, name: string): T | null {
+  const block = extractAssignmentCollection(source, name);
+  if (!block) return null;
+  const parser = new PythonLiteralParser(block);
+  return parser.parseValue() as T;
+}
+
+function asString(value: PythonLiteral | undefined, fallback = "-"): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function humanizeKey(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatActionSpecArg(value: string): string {
+  if (!value || value === "-") return "-";
+  if (value.toLowerCase() === "none") return "None";
+  return `\`${value}\``;
+}
+
+function inferStatusFields(
+  actionSpecs: Array<{ [key: string]: PythonLiteral }>,
+  miotMapping: { [key: string]: PythonLiteral } | null,
+): string[] {
+  if (!miotMapping) return [];
+
+  const rows = Object.keys(miotMapping).map((field) => {
+    const matchingAction = actionSpecs.find((item) => asString(item.action) === `set_${field}`);
+    const description = field === "power" ? "Power state" : humanizeKey(field);
+    const type = field === "power" ? "bool" : asString(matchingAction?.range);
+    return `| \`${field}\` | ${description} | ${type} |`;
+  });
+
+  return rows.filter(Boolean);
+}
+
+function generateActionSpecsMarkdown(pySource: string, pyFileName: string): string {
+  const deviceInfo = parsePythonAssignment<{ [key: string]: PythonLiteral }>(pySource, "DEVICE_INFO") ?? {};
+  const specs = parsePythonAssignment<PythonLiteral[]>(pySource, "ACTION_SPECS");
+  const miotMapping = parsePythonAssignment<{ [key: string]: PythonLiteral }>(pySource, "MIOT_MAPPING");
+
+  if (!specs || !Array.isArray(specs) || specs.length === 0) {
+    throw new Error("Device ZIP must define a non-empty ACTION_SPECS list in the Python file.");
+  }
+
+  const model = asString(deviceInfo.model, pyFileName.replace(/\.py$/i, ""));
+  const deviceName = asString(deviceInfo.display_name, model);
+  const platform = asString(deviceInfo.platform);
+  const actionSpecs = specs
+    .filter((item): item is { [key: string]: PythonLiteral } => typeof item === "object" && item !== null && !Array.isArray(item))
+    .filter((item) => asString(item.action) !== "query_status");
+
+  const rows = actionSpecs
+    .map((item) => {
+      const action = asString(item.action);
+      const description = asString(item.description);
+      const args = asString(item.args, "None");
+      const range = asString(item.range);
+      return `| \`${action}\` | ${description} | ${formatActionSpecArg(args)} | ${range} |`;
+    });
+
+  if (!rows.length) {
+    throw new Error("ACTION_SPECS must contain object entries with action metadata.");
+  }
+
+  const statusRows = inferStatusFields(actionSpecs, miotMapping);
+
+  return [
+    `# ${model} - Action Specs`,
+    "",
+    `**Device Name:** ${deviceName}  `,
+    `**Platform:** ${platform}  `,
+    `**Model:** ${model}`,
+    "",
+    "---",
+    "",
+    "## Supported Actions",
+    "",
+    "| action | Description | Parameters | Range |",
+    "|--------|-------------|------------|-------|",
+    ...rows,
+    "",
+    ...(statusRows.length
+      ? [
+          "---",
+          "",
+          "## Status Fields",
+          "",
+          "| Field | Description | Type |",
+          "|------|-------------|------|",
+          ...statusRows,
+          "",
+        ]
+      : []),
+  ].join("\n");
+}
+
+async function inspectDeviceZip(arrayBuffer: ArrayBuffer): Promise<{ actionSpecsMarkdown: string; readmeContent: string | null }> {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const files = Object.values(zip.files).filter((file) => !file.dir);
+  const pyFiles = files.filter((file) => {
+    const lower = file.name.toLowerCase();
+    return lower.endsWith(".py") && !lower.includes("__pycache__/");
+  });
+
+  if (!pyFiles.length) {
+    throw new Error("Device ZIP must include at least one Python driver file.");
+  }
+
+  const primaryPy =
+    pyFiles.find((file) => !file.name.toLowerCase().endsWith("/__init__.py")) ??
+    pyFiles[0];
+  const pySource = await primaryPy.async("string");
+  const actionSpecsMarkdown = generateActionSpecsMarkdown(pySource, primaryPy.name.split("/").pop() || "device.py");
+
+  const readmeFile =
+    files.find((file) => file.name.toLowerCase().endsWith("/readme.md")) ??
+    files.find((file) => file.name.toLowerCase() === "readme.md");
+
+  return {
+    actionSpecsMarkdown,
+    readmeContent: readmeFile ? await readmeFile.async("string") : null,
+  };
+}
+
+type UploadedDeviceBundle = {
+  zip_r2_key: string;
+  action_specs_r2_key: string;
+  readme_r2_key: string | null;
+  generated_action_specs: string;
+  has_readme: boolean;
+  url: string;
+};
+
+function parseBooleanFormValue(value: string | File | null, fallback: boolean): boolean {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+async function uploadDeviceZipBundle(
+  bytes: ArrayBuffer,
+  fileName: string,
+  contentType: string,
+  env: Env,
+): Promise<UploadedDeviceBundle> {
+  const inspected = await inspectDeviceZip(bytes);
+
+  const action_specs_r2_key = `uploads/action_specs/${uuid()}.md`;
+  await env.ASSETS.put(action_specs_r2_key, inspected.actionSpecsMarkdown, {
+    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+  });
+
+  let readme_r2_key: string | null = null;
+  if (inspected.readmeContent) {
+    readme_r2_key = `uploads/readme/${uuid()}.md`;
+    await env.ASSETS.put(readme_r2_key, inspected.readmeContent, {
+      httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+    });
+  }
+
+  const ext = fileName.split(".").pop() || "bin";
+  const zip_r2_key = `uploads/device_zip/${uuid()}.${ext}`;
+  await env.ASSETS.put(zip_r2_key, bytes, {
+    httpMetadata: { contentType: contentType || "application/octet-stream" },
+  });
+
+  return {
+    zip_r2_key,
+    action_specs_r2_key,
+    readme_r2_key,
+    generated_action_specs: inspected.actionSpecsMarkdown,
+    has_readme: Boolean(inspected.readmeContent),
+    url: `https://api.entroflow.ai/api/uploads/${zip_r2_key}`,
+  };
 }
 
 // Auto-generate {platform}_devices.json from D1 device/version data
@@ -110,7 +466,8 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
         dv.version,
         dv.is_latest,
         dv.zip_r2_key,
-        dv.action_specs_r2_key
+        dv.action_specs_r2_key,
+        dv.readme_r2_key
       FROM devices d
       INNER JOIN device_versions dv ON dv.device_id = d.id
       WHERE d.id = ? AND dv.id = ?
@@ -121,6 +478,7 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
       is_latest: number;
       zip_r2_key: string | null;
       action_specs_r2_key: string | null;
+      readme_r2_key: string | null;
     }>();
 
     if (!row) return;
@@ -143,6 +501,15 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
       );
     }
 
+    if (row.readme_r2_key) {
+      await publishAssetCopy(
+        row.readme_r2_key,
+        `platforms/${row.platform_id}/devices/${row.product_id}/readme.md`,
+        "text/markdown; charset=utf-8",
+        env
+      );
+    }
+
     if (row.is_latest) {
       await env.ASSETS.put(
         `platforms/${row.platform_id}/devices/${row.product_id}/latest.json`,
@@ -153,6 +520,179 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
   } catch (e) {
     console.error("Failed to sync device version assets:", e);
   }
+}
+
+async function requireInternalPublisher(request: Request, env: Env): Promise<Response | null> {
+  const configuredSecret = env.INTERNAL_PUBLISH_SECRET?.trim();
+  if (!configuredSecret) return forbidden("Internal publish API is not configured");
+
+  const token = getAuthToken(request);
+  if (!token) return unauthorized();
+  if (token !== configuredSecret) return unauthorized("Invalid publish token");
+
+  return null;
+}
+
+export async function handleInternalPublishRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
+  if (path !== "/v1/internal/publish/device" || request.method !== "POST") return null;
+
+  const authError = await requireInternalPublisher(request, env);
+  if (authError) return authError;
+
+  const formData = await request.formData();
+  const file = formData.get("file") as File | null;
+  const platform_id = (formData.get("platform_id") as string | null)?.trim() || "";
+  const product_id = (formData.get("product_id") as string | null)?.trim() || "";
+  const version = (formData.get("version") as string | null)?.trim() || "";
+  const name_en = (formData.get("name_en") as string | null)?.trim() || "";
+  const name_zh = (formData.get("name_zh") as string | null)?.trim() || null;
+  const github_url = (formData.get("github_url") as string | null)?.trim() || null;
+  const detail_image_url = (formData.get("detail_image_url") as string | null)?.trim() || null;
+  const status = (formData.get("status") as string | null)?.trim() || "published";
+  const is_featured = parseBooleanFormValue(formData.get("is_featured"), false);
+  const is_latest = parseBooleanFormValue(formData.get("is_latest"), true);
+  const overwrite = parseBooleanFormValue(formData.get("overwrite"), true);
+  const dry_run = parseBooleanFormValue(formData.get("dry_run"), false);
+
+  if (!file) return badRequest("file is required");
+  if (!platform_id) return badRequest("platform_id is required");
+  if (!product_id) return badRequest("product_id is required");
+  if (!version) return badRequest("version is required");
+  if (!name_en) return badRequest("name_en is required");
+
+  const platform = await env.DB.prepare(
+    "SELECT id FROM hardware_platforms WHERE id = ?"
+  ).bind(platform_id).first<{ id: string }>();
+  if (!platform) return badRequest("platform_id is not registered");
+
+  const bytes = await file.arrayBuffer();
+  let inspected: { actionSpecsMarkdown: string; readmeContent: string | null };
+  try {
+    inspected = await inspectDeviceZip(bytes);
+  } catch (error) {
+    return badRequest(error instanceof Error ? error.message : "Invalid device ZIP");
+  }
+
+  if (dry_run) {
+    return jsonResponse({
+      ok: true,
+      mode: "dry_run",
+      platform_id,
+      product_id,
+      version,
+      generated_action_specs: inspected.actionSpecsMarkdown,
+      has_readme: Boolean(inspected.readmeContent),
+    });
+  }
+
+  const ts = now();
+  const publisherId = "internal_publish_api";
+
+  let device = await env.DB.prepare(
+    "SELECT id FROM devices WHERE product_id = ? AND platform_id = ?"
+  ).bind(product_id, platform_id).first<{ id: string }>();
+
+  let created_device = false;
+  if (!device) {
+    const deviceId = uuid();
+    await env.DB.prepare(
+      "INSERT INTO devices (id, product_id, name_en, name_zh, platform_id, detail_image_url, github_url, is_featured, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      deviceId,
+      product_id,
+      name_en,
+      name_zh,
+      platform_id,
+      detail_image_url,
+      github_url,
+      is_featured ? 1 : 0,
+      status,
+      publisherId,
+      ts,
+      ts,
+    ).run();
+    device = { id: deviceId };
+    created_device = true;
+  } else {
+    await env.DB.prepare(
+      "UPDATE devices SET name_en=?, name_zh=?, detail_image_url=?, github_url=?, is_featured=?, status=?, updated_at=? WHERE id=?"
+    ).bind(
+      name_en,
+      name_zh,
+      detail_image_url,
+      github_url,
+      is_featured ? 1 : 0,
+      status,
+      ts,
+      device.id,
+    ).run();
+  }
+
+  const existingVersion = await env.DB.prepare(
+    "SELECT id FROM device_versions WHERE device_id = ? AND version = ?"
+  ).bind(device.id, version).first<{ id: string }>();
+
+  let overwritten_version = false;
+  if (existingVersion && !overwrite) {
+    return badRequest("device version already exists; set overwrite=true to replace it");
+  }
+
+  const upload = await uploadDeviceZipBundle(bytes, file.name, file.type, env);
+
+  if (is_latest) {
+    await env.DB.prepare("UPDATE device_versions SET is_latest = 0 WHERE device_id = ?").bind(device.id).run();
+  }
+
+  let versionId = existingVersion?.id ?? uuid();
+  if (existingVersion) {
+    overwritten_version = true;
+    await env.DB.prepare(
+      "UPDATE device_versions SET zip_r2_key=?, action_specs_r2_key=?, readme_r2_key=?, is_latest=?, published_at=?, created_by=? WHERE id=? AND device_id=?"
+    ).bind(
+      upload.zip_r2_key,
+      upload.action_specs_r2_key,
+      upload.readme_r2_key,
+      is_latest ? 1 : 0,
+      ts,
+      publisherId,
+      versionId,
+      device.id,
+    ).run();
+  } else {
+    await env.DB.prepare(
+      "INSERT INTO device_versions (id, device_id, version, is_latest, zip_r2_key, action_specs_r2_key, readme_r2_key, published_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      versionId,
+      device.id,
+      version,
+      is_latest ? 1 : 0,
+      upload.zip_r2_key,
+      upload.action_specs_r2_key,
+      upload.readme_r2_key,
+      ts,
+      publisherId,
+      ts,
+    ).run();
+  }
+
+  await syncDeviceVersionAssets(device.id, versionId, env);
+  await syncDeviceList(platform_id, env);
+
+  return jsonResponse({
+    ok: true,
+    mode: "publish",
+    created_device,
+    overwritten_version,
+    device_id: device.id,
+    version_id: versionId,
+    product_id,
+    platform_id,
+    version,
+    zip_r2_key: upload.zip_r2_key,
+    action_specs_r2_key: upload.action_specs_r2_key,
+    readme_r2_key: upload.readme_r2_key,
+    has_readme: upload.has_readme,
+  }, existingVersion ? 200 : 201);
 }
 
 export async function handleAdminRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
@@ -524,14 +1064,32 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
     if (!file) return badRequest("file is required");
     if (!type) return badRequest("type is required");
 
+    const bytes = await file.arrayBuffer();
+    let action_specs_r2_key: string | null = null;
+    let readme_r2_key: string | null = null;
+
+    if (type === "device_zip") {
+      try {
+        const upload = await uploadDeviceZipBundle(bytes, file.name, file.type, env);
+        return jsonResponse({
+          url: upload.url,
+          r2_key: upload.zip_r2_key,
+          action_specs_r2_key: upload.action_specs_r2_key,
+          readme_r2_key: upload.readme_r2_key,
+        }, 201);
+      } catch (error) {
+        return badRequest(error instanceof Error ? error.message : "Invalid device ZIP");
+      }
+    }
+
     const ext = file.name.split(".").pop() || "bin";
     const key = `uploads/${type}/${uuid()}.${ext}`;
-    await env.ASSETS.put(key, file.stream(), {
+    await env.ASSETS.put(key, bytes, {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
     });
 
     const url = `https://api.entroflow.ai/api/uploads/${key}`;
-    return jsonResponse({ url, r2_key: key }, 201);
+    return jsonResponse({ url, r2_key: key, action_specs_r2_key, readme_r2_key }, 201);
   }
 
   // ── Docs Management ──────────────────────────────────────────────────────

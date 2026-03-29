@@ -79,6 +79,26 @@ def set_installed_platforms(platforms: list):
     _save(data)
 
 
+def add_installed_platform(platform: str):
+    data = _load()
+    platforms = data.setdefault("installed_agent_platforms", [])
+    if platform not in platforms:
+        platforms.append(platform)
+    _save(data)
+
+
+def get_connected_platforms() -> list[str]:
+    data = _load()
+    platforms = data.get("installed_agent_platforms", [])
+    if isinstance(platforms, list) and platforms:
+        return [p for p in platforms if isinstance(p, str) and p]
+
+    assets = data.get("assets", {})
+    if isinstance(assets, dict):
+        return [key for key in assets.keys() if isinstance(key, str) and key]
+    return []
+
+
 def get_server_version() -> str | None:
     return _load().get("server_version")
 

@@ -16,7 +16,7 @@ def _load_catalog() -> list:
         return json.load(f).get("platforms", [])
 
 
-def _resolve_platform(name: str) -> tuple[str | None, str | None]:
+def resolve_platform(name: str) -> tuple[str | None, str | None]:
     """将用户输入解析为平台 id。返回 (platform_id, error_message)。"""
     name_lower = name.lower().strip()
     catalog = _load_catalog()
@@ -37,7 +37,7 @@ def platform_install(platform: str) -> str:
     首次使用某平台前必须先调用此工具。可用平台见 entroflow.io/devices。"""
     from core import downloader
 
-    platform_id, err = _resolve_platform(platform)
+    platform_id, err = resolve_platform(platform)
     if err:
         return err
 
