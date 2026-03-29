@@ -48,8 +48,7 @@ async function syncDeviceList(platformId: string, env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
       `SELECT DISTINCT d.product_id FROM devices d
-       INNER JOIN device_versions dv ON dv.device_id = d.id
-       WHERE d.platform_id = ? AND d.status = 'published' AND dv.zip_r2_key IS NOT NULL`
+       WHERE d.platform_id = ? AND d.status = 'published'`
     ).bind(platformId).all();
 
     const devices = results.map((r: any) => ({ model: r.product_id }));
