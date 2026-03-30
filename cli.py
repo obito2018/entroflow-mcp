@@ -163,21 +163,37 @@ def cmd_connect(args: argparse.Namespace) -> int:
     session_id = result.get("session_id")
     qr_url = result.get("qr_url")
     expires_in = result.get("expires_in")
+    login_type = str(result.get("type") or "qrcode").strip().lower()
+    login_message = str(result.get("message") or "").strip()
 
     if not session_id or not qr_url:
         raise RuntimeError(f"Unsupported login response for platform '{platform}': {result}")
 
     _print("")
     opened = _open_browser(qr_url)
-    if opened:
-        _print("A browser window was opened for login. Complete confirmation in the platform app.")
+    if login_type == "form":
+        if opened:
+            _print("A browser window was opened for login. Complete the local connection form there.")
+        else:
+            _print("Could not open the browser automatically. Open the following URL and complete the local connection form:")
     else:
-        _print("Could not open the browser automatically. Open the following URL and complete login in the platform app:")
+        if opened:
+            _print("A browser window was opened for login. Complete confirmation in the platform app.")
+        else:
+            _print("Could not open the browser automatically. Open the following URL and complete login in the platform app:")
     _print(qr_url)
     if expires_in:
-        _print(f"QR code expires in {expires_in} seconds.")
+        if login_type == "form":
+            _print(f"Connection form expires in {expires_in} seconds.")
+        else:
+            _print(f"QR code expires in {expires_in} seconds.")
+    if login_message:
+        _print(login_message)
     _print("")
-    input("Press Enter after you have scanned and confirmed the login...")
+    if login_type == "form":
+        input("Press Enter after you have submitted the connection form...")
+    else:
+        input("Press Enter after you have scanned and confirmed the login...")
 
     while True:
         poll = connector.poll_qr_login(session_id)
@@ -187,7 +203,8 @@ def cmd_connect(args: argparse.Namespace) -> int:
             _print(f"Platform '{platform}' connected successfully.")
             return 0
         if status == "waiting":
-            _print("Still waiting for confirmation...")
+            wait_message = str(poll.get("message") or "").strip()
+            _print(wait_message or "Still waiting for confirmation...")
             time.sleep(3)
             continue
         if status == "expired":
