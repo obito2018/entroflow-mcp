@@ -346,6 +346,30 @@ async function inspectDeviceZip(arrayBuffer: ArrayBuffer): Promise<{ actionSpecs
   };
 }
 
+async function inspectPlatformZip(arrayBuffer: ArrayBuffer): Promise<{ hasClientPy: boolean; hasEmbeddedDeviceList: boolean }> {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const files = Object.values(zip.files).filter((file) => !file.dir);
+
+  const hasClientPy = files.some((file) => {
+    const normalized = file.name.replace(/\\/g, "/").toLowerCase();
+    return normalized === "client.py" || normalized.endsWith("/client.py");
+  });
+
+  if (!hasClientPy) {
+    throw new Error("Platform ZIP must include client.py.");
+  }
+
+  const hasEmbeddedDeviceList = files.some((file) => {
+    const normalized = file.name.replace(/\\/g, "/").toLowerCase();
+    return normalized.endsWith("_devices.json");
+  });
+
+  return {
+    hasClientPy,
+    hasEmbeddedDeviceList,
+  };
+}
+
 type UploadedDeviceBundle = {
   zip_r2_key: string;
   action_specs_r2_key: string;
@@ -534,7 +558,80 @@ async function requireInternalPublisher(request: Request, env: Env): Promise<Res
 }
 
 export async function handleInternalPublishRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
-  if (path !== "/v1/internal/publish/device" || request.method !== "POST") return null;
+  if (request.method !== "POST") return null;
+
+  if (path === "/v1/internal/publish/platform") {
+    const authError = await requireInternalPublisher(request, env);
+    if (authError) return authError;
+
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const platform_id = (formData.get("platform_id") as string | null)?.trim() || "";
+    const version = (formData.get("version") as string | null)?.trim() || "";
+    const dry_run = parseBooleanFormValue(formData.get("dry_run"), false);
+    const overwrite = parseBooleanFormValue(formData.get("overwrite"), true);
+
+    if (!file) return badRequest("file is required");
+    if (!platform_id) return badRequest("platform_id is required");
+    if (!version) return badRequest("version is required");
+
+    const platform = await env.DB.prepare(
+      "SELECT id FROM hardware_platforms WHERE id = ?"
+    ).bind(platform_id).first<{ id: string }>();
+    if (!platform) return badRequest("platform_id is not registered");
+
+    const bytes = await file.arrayBuffer();
+    let inspected: { hasClientPy: boolean; hasEmbeddedDeviceList: boolean };
+    try {
+      inspected = await inspectPlatformZip(bytes);
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Invalid platform ZIP");
+    }
+
+    if (dry_run) {
+      return jsonResponse({
+        ok: true,
+        mode: "dry_run",
+        platform_id,
+        version,
+        has_client_py: inspected.hasClientPy,
+        has_embedded_device_list: inspected.hasEmbeddedDeviceList,
+      });
+    }
+
+    const zipKey = `platforms/${platform_id}/v${version}.zip`;
+    const existingZip = await env.ASSETS.get(zipKey);
+    if (existingZip && !overwrite) {
+      return badRequest("platform version already exists; set overwrite=true to replace it");
+    }
+
+    await env.ASSETS.put(zipKey, bytes, {
+      httpMetadata: { contentType: file.type || "application/zip" },
+    });
+
+    await env.ASSETS.put(
+      `platforms/${platform_id}/latest.json`,
+      JSON.stringify({ version }),
+      {
+        httpMetadata: { contentType: "application/json" },
+      }
+    );
+
+    await syncDeviceList(platform_id, env);
+
+    return jsonResponse({
+      ok: true,
+      mode: "publish",
+      overwritten_version: Boolean(existingZip),
+      platform_id,
+      version,
+      zip_r2_key: zipKey,
+      has_client_py: inspected.hasClientPy,
+      has_embedded_device_list: inspected.hasEmbeddedDeviceList,
+    }, existingZip ? 200 : 201);
+  }
+
+  if (path !== "/v1/internal/publish/device") return null;
 
   const authError = await requireInternalPublisher(request, env);
   if (authError) return authError;
