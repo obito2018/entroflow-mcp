@@ -267,6 +267,7 @@ def _normalize_setup_inputs(args: argparse.Namespace) -> tuple[str, str, str]:
 def cmd_setup(args: argparse.Namespace) -> int:
     _refresh_catalog()
     platform, did, model = _normalize_setup_inputs(args)
+    version = args.version.strip() if isinstance(args.version, str) and args.version.strip() else None
 
     if not all([args.name, args.location, args.remark]):
         raise RuntimeError("Setup requires --name, --location, and --remark.")
@@ -293,11 +294,21 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     driver_path = ASSETS_DIR / platform / "devices" / model / f"{model}.py"
     if driver_path.exists():
-        _print(f"Device driver already installed: {model}")
+        installed_version = config.get_device_version(platform, model)
+        if version and installed_version == version:
+            _print(f"Device driver already installed: {model} (v{installed_version})")
+        elif version:
+            installed_version_text = f"v{installed_version}" if installed_version else "unknown version"
+            _print(f"Replacing device driver {model} ({installed_version_text}) with v{version}")
+            downloaded_version = downloader.download_device(model, platform, version)
+            config.set_device_version(platform, model, downloaded_version)
+            _print(f"Installed device driver {model} (v{downloaded_version})")
+        else:
+            _print(f"Device driver already installed: {model}")
     else:
-        version = downloader.download_device(model, platform)
-        config.set_device_version(platform, model, version)
-        _print(f"Installed device driver {model} (v{version})")
+        downloaded_version = downloader.download_device(model, platform, version)
+        config.set_device_version(platform, model, downloaded_version)
+        _print(f"Installed device driver {model} (v{downloaded_version})")
 
     result = store.register(did, model, platform, args.name, args.location, args.remark)
     if result["ok"]:
@@ -337,6 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--platform", help="Platform id, e.g. mihome")
     setup_parser.add_argument("--did", help="Platform device id")
     setup_parser.add_argument("--model", help="Device model id")
+    setup_parser.add_argument("--version", help="Optional device driver version, e.g. 1.0.2")
     setup_parser.add_argument("--name", help="Human-friendly device name")
     setup_parser.add_argument("--location", help="Device location")
     setup_parser.add_argument("--remark", help="Device remark")

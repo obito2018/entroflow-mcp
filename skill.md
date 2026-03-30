@@ -57,7 +57,7 @@ entroflow list-devices
 Set up a device:
 
 ```bash
-entroflow setup --platform mihome --did 708678806 --model yeelink.light.lamp22 --name "Desk Lamp" --location "Office" --remark "Display light"
+entroflow setup --platform mihome --did 708678806 --model yeelink.light.lamp22 --version 1.0.0 --name "Desk Lamp" --location "Office" --remark "Display light"
 ```
 
 Update local assets and server code:

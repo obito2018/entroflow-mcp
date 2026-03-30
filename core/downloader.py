@@ -61,9 +61,9 @@ def download_platform(platform: str) -> str:
     return version
 
 
-def download_device(model: str, platform: str) -> str:
+def download_device(model: str, platform: str, version: str | None = None) -> str:
     """下载设备包，解压到 assets/{platform}/devices/{model}/，返回版本号。"""
-    version = get_device_latest_version(platform, model)
+    version = version or get_device_latest_version(platform, model)
     url = f"{API_BASE}/platforms/{platform}/devices/{model}/{version}"
     dest = ASSETS_DIR / platform / "devices" / model
     _download_and_extract(url, dest)
