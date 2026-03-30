@@ -15,9 +15,8 @@ Use CLI for any one-time or low-frequency operation:
 - connecting a platform
 - authenticating an account
 - listing connected devices
-- downloading a device resource
-- installing a device driver
-- registering a device into the local runtime
+- downloading a device resource package
+- setting up a device into the local runtime
 - updating local assets or the server
 
 ### CLI Commands
@@ -55,17 +54,22 @@ List devices from connected platforms:
 entroflow list-devices
 ```
 
-Download a device resource into local assets:
+Download a device resource package into local assets:
 
 ```bash
 entroflow download --platform mihome --model yeelink.light.lamp22 --version 1.0.0
 ```
 
-Set up a device:
+Use `download` when the user only wants the resource files locally.
+It does not instantiate or register the device.
+
+Set up a device into the local runtime:
 
 ```bash
 entroflow setup --platform mihome --did 708678806 --model yeelink.light.lamp22 --version 1.0.0 --name "Desk Lamp" --location "Office" --remark "Display light"
 ```
+
+Use `setup` when the device should become directly usable through the runtime MCP tools.
 
 Update local assets and server code:
 
@@ -109,8 +113,10 @@ For a brand new user or a new platform, always follow this order:
 3. Do not assume a platform id. Always confirm it with `entroflow list-platforms`.
 4. If a platform is listed but its local guide is missing, run `entroflow update` before connecting it.
 5. If the guide is still missing after update, stop and tell the user the platform guide is not published locally yet.
-6. If runtime tools say a device is missing, go back to the CLI setup flow.
-7. If the user wants to add another device on an already connected platform, use:
+6. If the user only needs the resource package, use `entroflow download`.
+7. If the user wants the device to become callable through MCP, use `entroflow setup`.
+8. If runtime tools say a device is missing, go back to the CLI setup flow.
+9. If the user wants to add another device on an already connected platform, use:
    - `entroflow list-devices`
    - `entroflow setup ...`
 
