@@ -9,12 +9,8 @@ CATALOG_FILE = ASSETS_DIR / "catalog.json"
 
 
 def _connector_entry_exists(connector_dir: Path, platform_id: str) -> bool:
-    candidates = [
-        connector_dir / "client.py",
-        connector_dir / f"{platform_id}_client.py",
-        connector_dir / "mihome_client.py",
-    ]
-    return any(path.exists() for path in candidates)
+    del platform_id
+    return (connector_dir / "client.py").exists()
 
 
 def _load_catalog() -> list:

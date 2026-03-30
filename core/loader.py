@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import importlib.util
-import inspect
 import json
 import sys
 from pathlib import Path
@@ -27,19 +26,9 @@ def _load_module(name: str, file_path: Path):
 
 def _resolve_connector_path(platform: str) -> Path:
     connector_dir = ASSETS_DIR / platform / "connector"
-    candidates = [
-        connector_dir / "client.py",
-        connector_dir / f"{platform}_client.py",
-        connector_dir / "mihome_client.py",
-    ]
-
-    for path in candidates:
-        if path.exists():
-            return path
-
-    legacy_matches = sorted(connector_dir.glob("*_client.py"))
-    if legacy_matches:
-        return legacy_matches[0]
+    client_path = connector_dir / "client.py"
+    if client_path.exists():
+        return client_path
 
     raise FileNotFoundError(
         f"Platform '{platform}' is not connected. Run `entroflow connect {platform}` first."
@@ -64,37 +53,15 @@ def load_device_class(platform: str, model: str):
 
 
 def list_connector_devices(connector):
-    if hasattr(connector, "list_devices"):
-        return connector.list_devices()
-    if hasattr(connector, "list_mihome_devices"):
-        return connector.list_mihome_devices()
-    raise AttributeError("Connector does not expose a supported device listing method.")
-
-
-def _build_device_kwargs(device_cls, did: str, connector):
-    signature = inspect.signature(device_cls.__init__)
-    params = signature.parameters
-
-    kwargs: Dict[str, Any] = {"did": did}
-    if "connector" in params:
-        kwargs["connector"] = connector
-    elif "client" in params:
-        kwargs["client"] = connector
-    elif "mihome_client" in params:
-        kwargs["mihome_client"] = connector
-    else:
-        return {}
-    return kwargs
+    if not hasattr(connector, "list_devices"):
+        raise AttributeError("Connector must expose list_devices().")
+    return connector.list_devices()
 
 
 def create_device_instance(record: Dict[str, Any]):
     connector = load_connector(record["platform"])
     device_mod = load_device_class(record["platform"], record["model"])
-    device_cls = device_mod.DeviceClass
-    kwargs = _build_device_kwargs(device_cls, record["did"], connector)
-    if kwargs:
-        return device_cls(**kwargs)
-    return device_cls(record["did"], connector)
+    return device_mod.DeviceClass(did=record["did"], connector=connector)
 
 
 def load_platform_devices(platform: str):
