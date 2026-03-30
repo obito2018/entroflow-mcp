@@ -507,10 +507,13 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
 
     if (!row) return;
 
+    const deviceBaseKey = `platforms/${row.platform_id}/devices/${row.product_id}`;
+    const versionBaseKey = `${deviceBaseKey}/v${row.version}`;
+
     if (row.zip_r2_key) {
       await publishAssetCopy(
         row.zip_r2_key,
-        `platforms/${row.platform_id}/devices/${row.product_id}/v${row.version}.zip`,
+        `${deviceBaseKey}/v${row.version}.zip`,
         "application/zip",
         env
       );
@@ -519,7 +522,7 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
     if (row.action_specs_r2_key) {
       await publishAssetCopy(
         row.action_specs_r2_key,
-        `platforms/${row.platform_id}/devices/${row.product_id}/action_specs.md`,
+        `${versionBaseKey}/action_specs.md`,
         "text/markdown; charset=utf-8",
         env
       );
@@ -528,15 +531,33 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
     if (row.readme_r2_key) {
       await publishAssetCopy(
         row.readme_r2_key,
-        `platforms/${row.platform_id}/devices/${row.product_id}/readme.md`,
+        `${versionBaseKey}/readme.md`,
         "text/markdown; charset=utf-8",
         env
       );
     }
 
     if (row.is_latest) {
+      if (row.action_specs_r2_key) {
+        await publishAssetCopy(
+          row.action_specs_r2_key,
+          `${deviceBaseKey}/action_specs.md`,
+          "text/markdown; charset=utf-8",
+          env
+        );
+      }
+
+      if (row.readme_r2_key) {
+        await publishAssetCopy(
+          row.readme_r2_key,
+          `${deviceBaseKey}/readme.md`,
+          "text/markdown; charset=utf-8",
+          env
+        );
+      }
+
       await env.ASSETS.put(
-        `platforms/${row.platform_id}/devices/${row.product_id}/latest.json`,
+        `${deviceBaseKey}/latest.json`,
         JSON.stringify({ version: row.version }),
         { httpMetadata: { contentType: "application/json" } }
       );

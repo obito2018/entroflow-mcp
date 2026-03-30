@@ -1,6 +1,56 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, uuid, now } from "../lib/utils";
 
+const MARKDOWN_RESPONSE_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Content-Type": "text/markdown; charset=utf-8",
+};
+
+async function getDeviceVersionMarkdown(
+  env: Env,
+  platform: string,
+  model: string,
+  version: string,
+  filename: "action_specs.md" | "readme.md",
+  assetColumn: "action_specs_r2_key" | "readme_r2_key",
+): Promise<string | null> {
+  const versionedObj = await env.ASSETS.get(`platforms/${platform}/devices/${model}/v${version}/${filename}`);
+  if (versionedObj) {
+    return versionedObj.text();
+  }
+
+  const row = await env.DB.prepare(`
+    SELECT dv.${assetColumn} AS asset_key
+    FROM devices d
+    INNER JOIN device_versions dv ON dv.device_id = d.id
+    WHERE d.platform_id = ? AND d.product_id = ? AND dv.version = ?
+    LIMIT 1
+  `).bind(platform, model, version).first<{ asset_key: string | null }>();
+
+  if (!row?.asset_key) {
+    return null;
+  }
+
+  const sourceObj = await env.ASSETS.get(row.asset_key);
+  if (!sourceObj) {
+    return null;
+  }
+
+  return sourceObj.text();
+}
+
+async function getLatestDeviceVersion(env: Env, platform: string, model: string): Promise<string | null> {
+  const row = await env.DB.prepare(`
+    SELECT dv.version
+    FROM devices d
+    INNER JOIN device_versions dv ON dv.device_id = d.id
+    WHERE d.platform_id = ? AND d.product_id = ? AND dv.is_latest = 1
+    LIMIT 1
+  `).bind(platform, model).first<{ version: string | null }>();
+
+  return row?.version ?? null;
+}
+
 export async function handleAssetRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
   // GET /api/install-device.ps1?model=&platform=&version=
@@ -224,11 +274,35 @@ export async function handleAssetRoutes(path: string, request: Request, env: Env
   const deviceActionSpecs = path.match(/^\/api\/platforms\/([^/]+)\/devices\/([^/]+)\/action_specs$/);
   if (deviceActionSpecs) {
     const [, platform, model] = deviceActionSpecs;
+    const latestVersion = await getLatestDeviceVersion(env, platform, model);
+    if (latestVersion) {
+      const markdown = await getDeviceVersionMarkdown(env, platform, model, latestVersion, "action_specs.md", "action_specs_r2_key");
+      if (markdown) {
+        return new Response(markdown, { headers: MARKDOWN_RESPONSE_HEADERS });
+      }
+    }
+
     const obj = await env.ASSETS.get(`platforms/${platform}/devices/${model}/action_specs.md`);
     if (!obj) return notFound(`action_specs for '${model}' not found`);
-    return new Response(await obj.text(), {
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "text/markdown; charset=utf-8" },
-    });
+    return new Response(await obj.text(), { headers: MARKDOWN_RESPONSE_HEADERS });
+  }
+
+  // GET /api/platforms/{platform}/devices/{model}/{version}/action_specs
+  const deviceVersionActionSpecs = path.match(/^\/api\/platforms\/([^/]+)\/devices\/([^/]+)\/([^/]+)\/action_specs$/);
+  if (deviceVersionActionSpecs) {
+    const [, platform, model, version] = deviceVersionActionSpecs;
+    const markdown = await getDeviceVersionMarkdown(env, platform, model, version, "action_specs.md", "action_specs_r2_key");
+    if (!markdown) return notFound(`action_specs for '${model}' v${version} not found`);
+    return new Response(markdown, { headers: MARKDOWN_RESPONSE_HEADERS });
+  }
+
+  // GET /api/platforms/{platform}/devices/{model}/{version}/readme
+  const deviceVersionReadme = path.match(/^\/api\/platforms\/([^/]+)\/devices\/([^/]+)\/([^/]+)\/readme$/);
+  if (deviceVersionReadme) {
+    const [, platform, model, version] = deviceVersionReadme;
+    const markdown = await getDeviceVersionMarkdown(env, platform, model, version, "readme.md", "readme_r2_key");
+    if (!markdown) return notFound(`readme for '${model}' v${version} not found`);
+    return new Response(markdown, { headers: MARKDOWN_RESPONSE_HEADERS });
   }
 
   // GET /api/platforms/{platform}/devices/{model}/latest
