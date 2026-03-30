@@ -15,6 +15,7 @@ Use CLI for any one-time or low-frequency operation:
 - connecting a platform
 - authenticating an account
 - listing connected devices
+- downloading a device resource
 - installing a device driver
 - registering a device into the local runtime
 - updating local assets or the server
@@ -52,6 +53,12 @@ List devices from connected platforms:
 
 ```bash
 entroflow list-devices
+```
+
+Download a device resource into local assets:
+
+```bash
+entroflow download --platform mihome --model yeelink.light.lamp22 --version 1.0.0
 ```
 
 Set up a device:

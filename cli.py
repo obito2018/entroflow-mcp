@@ -245,6 +245,21 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_download(args: argparse.Namespace) -> int:
+    _refresh_catalog()
+    platform = _resolve_platform_or_exit(args.platform)
+    model = (args.model or "").strip()
+    version = args.version.strip() if isinstance(args.version, str) and args.version.strip() else None
+
+    if not model:
+        raise RuntimeError("Download requires --model.")
+
+    downloaded_version = downloader.download_device(model, platform, version)
+    config.set_device_version(platform, model, downloaded_version)
+    _print(f"Downloaded device resource: {model} (v{downloaded_version})")
+    return 0
+
+
 def _normalize_setup_inputs(args: argparse.Namespace) -> tuple[str, str, str]:
     platform = args.platform
     did = args.did
@@ -342,6 +357,12 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list-devices", help="List devices from connected platforms")
     list_parser.add_argument("--platform", help="Only list devices for one platform")
     list_parser.set_defaults(func=cmd_list_devices)
+
+    download_parser = subparsers.add_parser("download", help="Download a device resource into local assets")
+    download_parser.add_argument("--platform", required=True, help="Platform id, e.g. mihome")
+    download_parser.add_argument("--model", required=True, help="Device model id")
+    download_parser.add_argument("--version", help="Optional device driver version, e.g. 1.0.2")
+    download_parser.set_defaults(func=cmd_download)
 
     setup_parser = subparsers.add_parser("setup", help="Install a device driver and register the device locally")
     setup_parser.add_argument("device", nargs="?", help="Optional did or platform:did")
