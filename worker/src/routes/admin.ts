@@ -244,7 +244,20 @@ function formatActionSpecArg(value: string): string {
 function inferStatusFields(
   actionSpecs: Array<{ [key: string]: PythonLiteral }>,
   miotMapping: { [key: string]: PythonLiteral } | null,
+  statusFields: Array<{ [key: string]: PythonLiteral }> | null,
 ): string[] {
+  if (statusFields?.length) {
+    return statusFields
+      .map((item) => {
+        const field = asString(item.field ?? item.name);
+        if (!field || field === "-") return "";
+        const description = asString(item.description, humanizeKey(field));
+        const type = asString(item.type, "string");
+        return `| \`${field}\` | ${description} | ${type} |`;
+      })
+      .filter(Boolean);
+  }
+
   if (!miotMapping) return [];
 
   const rows = Object.keys(miotMapping).map((field) => {
@@ -261,6 +274,7 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
   const deviceInfo = parsePythonAssignment<{ [key: string]: PythonLiteral }>(pySource, "DEVICE_INFO") ?? {};
   const specs = parsePythonAssignment<PythonLiteral[]>(pySource, "ACTION_SPECS");
   const miotMapping = parsePythonAssignment<{ [key: string]: PythonLiteral }>(pySource, "MIOT_MAPPING");
+  const statusFields = parsePythonAssignment<PythonLiteral[]>(pySource, "STATUS_FIELDS");
 
   if (!specs || !Array.isArray(specs) || specs.length === 0) {
     throw new Error("Device ZIP must define a non-empty ACTION_SPECS list in the Python file.");
@@ -286,7 +300,13 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
     throw new Error("ACTION_SPECS must contain object entries with action metadata.");
   }
 
-  const statusRows = inferStatusFields(actionSpecs, miotMapping);
+  const parsedStatusFields = Array.isArray(statusFields)
+    ? statusFields.filter(
+        (item): item is { [key: string]: PythonLiteral } =>
+          typeof item === "object" && item !== null && !Array.isArray(item)
+      )
+    : null;
+  const statusRows = inferStatusFields(actionSpecs, miotMapping, parsedStatusFields);
 
   return [
     `# ${model} - Action Specs`,
