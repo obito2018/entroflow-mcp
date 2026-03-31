@@ -5,13 +5,17 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
 
   // GET /v1/stats
   if (path === "/v1/stats" && request.method === "GET") {
-    const [devicesResult, platformsResult] = await Promise.all([
+    const [devicesResult, platformsResult, agentInstallsResult, downloadsResult] = await Promise.all([
       env.DB.prepare("SELECT COUNT(*) as count FROM devices WHERE status = 'published'").first<{ count: number }>(),
       env.DB.prepare("SELECT COUNT(*) as count FROM hardware_platforms WHERE status = 'published'").first<{ count: number }>(),
+      env.DB.prepare("SELECT COUNT(DISTINCT install_id) as count FROM download_logs WHERE install_id IS NOT NULL").first<{ count: number }>(),
+      env.DB.prepare("SELECT COALESCE(SUM(downloads_count), 0) as count FROM devices WHERE status = 'published'").first<{ count: number }>(),
     ]);
     return jsonResponse({
       devices_count: devicesResult?.count ?? 0,
       platforms_count: platformsResult?.count ?? 0,
+      agent_installs_count: agentInstallsResult?.count ?? 0,
+      downloads_total: downloadsResult?.count ?? 0,
     });
   }
 
