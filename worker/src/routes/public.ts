@@ -1,14 +1,55 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, badRequest, uuid, now, getAuthToken, verifyJwt } from "../lib/utils";
 
+async function ensureAgentInstallTables(env: Env): Promise<void> {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS agent_install_platforms (
+      id           TEXT PRIMARY KEY,
+      install_id   TEXT NOT NULL,
+      platform_key TEXT NOT NULL,
+      platform_label TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      UNIQUE(install_id, platform_key)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_agent_install_platforms_install ON agent_install_platforms(install_id)"
+  ).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_agent_install_platforms_platform ON agent_install_platforms(platform_key)"
+  ).run();
+}
+
+function normalizeAgentPlatforms(input: unknown): Array<{ key: string; label: string }> {
+  if (!Array.isArray(input)) return [];
+
+  const normalized: Array<{ key: string; label: string }> = [];
+  const seen = new Set<string>();
+
+  for (const item of input) {
+    if (typeof item !== "string") continue;
+    const label = item.trim();
+    if (!label) continue;
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ key, label });
+  }
+
+  return normalized;
+}
+
 export async function handlePublicRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
 
   // GET /v1/stats
   if (path === "/v1/stats" && request.method === "GET") {
+    await ensureAgentInstallTables(env);
+
     const [devicesResult, platformsResult, agentInstallsResult, downloadsResult] = await Promise.all([
       env.DB.prepare("SELECT COUNT(*) as count FROM devices WHERE status = 'published'").first<{ count: number }>(),
       env.DB.prepare("SELECT COUNT(*) as count FROM hardware_platforms WHERE status = 'published'").first<{ count: number }>(),
-      env.DB.prepare("SELECT COUNT(DISTINCT install_id) as count FROM download_logs WHERE install_id IS NOT NULL").first<{ count: number }>(),
+      env.DB.prepare("SELECT COUNT(*) as count FROM agent_install_platforms").first<{ count: number }>(),
       env.DB.prepare("SELECT COALESCE(SUM(downloads_count), 0) as count FROM devices WHERE status = 'published'").first<{ count: number }>(),
     ]);
     return jsonResponse({
@@ -16,6 +57,39 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
       platforms_count: platformsResult?.count ?? 0,
       agent_installs_count: agentInstallsResult?.count ?? 0,
       downloads_total: downloadsResult?.count ?? 0,
+    });
+  }
+
+  // POST /v1/agent-installs/report
+  if (path === "/v1/agent-installs/report" && request.method === "POST") {
+    await ensureAgentInstallTables(env);
+
+    const body = await request.json().catch(() => null) as {
+      install_id?: unknown;
+      platforms?: unknown;
+    } | null;
+
+    const installId = typeof body?.install_id === "string" ? body.install_id.trim() : "";
+    if (!installId) return badRequest("install_id is required");
+    if (installId.length > 128) return badRequest("install_id is invalid");
+
+    const platforms = normalizeAgentPlatforms(body?.platforms);
+    const timestamp = now();
+
+    await env.DB.prepare("DELETE FROM agent_install_platforms WHERE install_id = ?").bind(installId).run();
+
+    for (const platform of platforms) {
+      await env.DB.prepare(`
+        INSERT INTO agent_install_platforms (id, install_id, platform_key, platform_label, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(uuid(), installId, platform.key, platform.label, timestamp, timestamp).run();
+    }
+
+    return jsonResponse({
+      ok: true,
+      install_id: installId,
+      platforms_count: platforms.length,
+      platforms,
     });
   }
 

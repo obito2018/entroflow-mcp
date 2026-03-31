@@ -107,6 +107,19 @@ CREATE TABLE IF NOT EXISTS download_logs (
 CREATE INDEX IF NOT EXISTS idx_download_logs_device ON download_logs(device_id);
 CREATE INDEX IF NOT EXISTS idx_download_logs_channel ON download_logs(channel);
 
+-- Agent 安装平台统计表
+CREATE TABLE IF NOT EXISTS agent_install_platforms (
+  id             TEXT PRIMARY KEY,
+  install_id     TEXT NOT NULL,
+  platform_key   TEXT NOT NULL,
+  platform_label TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  UNIQUE(install_id, platform_key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_install_platforms_install ON agent_install_platforms(install_id);
+CREATE INDEX IF NOT EXISTS idx_agent_install_platforms_platform ON agent_install_platforms(platform_key);
+
 -- 文档分区表
 CREATE TABLE IF NOT EXISTS doc_sections (
   id         TEXT PRIMARY KEY,
