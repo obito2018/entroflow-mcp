@@ -1,3 +1,4 @@
 mcp[cli]
 httpx
 pycryptodome
+pyzmq
