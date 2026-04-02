@@ -296,10 +296,6 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
       return `| \`${action}\` | ${description} | ${formatActionSpecArg(args)} | ${range} |`;
     });
 
-  if (!rows.length) {
-    throw new Error("ACTION_SPECS must contain object entries with action metadata.");
-  }
-
   const parsedStatusFields = Array.isArray(statusFields)
     ? statusFields.filter(
         (item): item is { [key: string]: PythonLiteral } =>
@@ -319,9 +315,15 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
     "",
     "## Supported Actions",
     "",
-    "| action | Description | Parameters | Range |",
-    "|--------|-------------|------------|-------|",
-    ...rows,
+    ...(rows.length
+      ? [
+          "| action | Description | Parameters | Range |",
+          "|--------|-------------|------------|-------|",
+          ...rows,
+        ]
+      : [
+          "This resource is read-only and only exposes the standard `query_status` runtime call.",
+        ]),
     "",
     ...(statusRows.length
       ? [
