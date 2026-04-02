@@ -106,7 +106,7 @@ def download_server() -> str:
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         for member in zf.namelist():
             # 只覆盖代码文件，跳过用户数据
-            if any(member.startswith(p) for p in ("data/", "runtime/", "config.json")):
+            if any(member.startswith(p) for p in ("data/", "runtime/", "config.json", "assets/catalog.json")):
                 continue
             zf.extract(member, dest)
     return version

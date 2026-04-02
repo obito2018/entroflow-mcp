@@ -10,7 +10,6 @@ on:
       - 'requirements.txt'
       - 'core/**'
       - 'tools/**'
-      - 'assets/catalog.json'
       - '.github/workflows/deploy-server.yml'
 
 jobs:
@@ -32,7 +31,6 @@ jobs:
             requirements.txt \
             core \
             tools \
-            assets/catalog.json \
             --exclude "**/__pycache__/*" \
             --exclude "**/*.pyc"
 

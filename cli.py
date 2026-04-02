@@ -356,6 +356,12 @@ def cmd_update(_: argparse.Namespace) -> int:
     _print(check_updates())
     _print("")
     _print(update_server())
+    _print("")
+    try:
+        downloader.refresh_catalog()
+        _print("Platform catalog refreshed.")
+    except Exception as exc:
+        _print(f"Platform catalog refresh failed: {exc}")
     return 0
 
 
