@@ -2,3 +2,4 @@ mcp[cli]
 httpx
 pycryptodome
 pyzmq
+websocket-client
