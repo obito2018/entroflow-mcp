@@ -276,14 +276,14 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
   const miotMapping = parsePythonAssignment<{ [key: string]: PythonLiteral }>(pySource, "MIOT_MAPPING");
   const statusFields = parsePythonAssignment<PythonLiteral[]>(pySource, "STATUS_FIELDS");
 
-  if (!specs || !Array.isArray(specs) || specs.length === 0) {
-    throw new Error("Device ZIP must define a non-empty ACTION_SPECS list in the Python file.");
+  if (specs && !Array.isArray(specs)) {
+    throw new Error("Device ZIP ACTION_SPECS must be a list in the Python file.");
   }
 
   const model = asString(deviceInfo.model, pyFileName.replace(/\.py$/i, ""));
   const deviceName = asString(deviceInfo.display_name, model);
   const platform = asString(deviceInfo.platform);
-  const actionSpecs = specs
+  const actionSpecs = (Array.isArray(specs) ? specs : [])
     .filter((item): item is { [key: string]: PythonLiteral } => typeof item === "object" && item !== null && !Array.isArray(item))
     .filter((item) => asString(item.action) !== "query_status");
 
@@ -322,7 +322,7 @@ function generateActionSpecsMarkdown(pySource: string, pyFileName: string): stri
           ...rows,
         ]
       : [
-          "This resource is read-only and only exposes the standard `query_status` runtime call.",
+          "No control actions available. Use `device_status`.",
         ]),
     "",
     ...(statusRows.length
