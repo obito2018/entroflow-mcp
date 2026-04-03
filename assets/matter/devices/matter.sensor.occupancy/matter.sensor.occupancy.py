@@ -11,7 +11,9 @@ SUPPORTED_ACTIONS = {
     "query_status",
 }
 
-ACTION_SPECS = []
+ACTION_SPECS = [
+    {"action": "query_status", "description": "Read the current occupancy status.", "args": "None", "range": "-"},
+]
 
 STATUS_FIELDS = [
     {"field": "occupied", "description": "Whether occupancy is currently detected.", "type": "bool"},

@@ -11,7 +11,9 @@ SUPPORTED_ACTIONS = {
     "query_status",
 }
 
-ACTION_SPECS = []
+ACTION_SPECS = [
+    {"action": "query_status", "description": "Read the current contact status.", "args": "None", "range": "-"},
+]
 
 STATUS_FIELDS = [
     {"field": "contact_detected", "description": "Whether contact is currently detected.", "type": "bool"},
