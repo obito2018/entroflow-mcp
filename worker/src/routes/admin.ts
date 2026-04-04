@@ -600,8 +600,171 @@ async function requireInternalPublisher(request: Request, env: Env): Promise<Res
   return null;
 }
 
+type InternalDocInput = {
+  slug: string;
+  title_en: string;
+  title_zh?: string | null;
+  content_en?: string | null;
+  content_zh?: string | null;
+  sort_order?: number | null;
+  status?: string | null;
+};
+
+function normalizeInternalDocInput(raw: any): InternalDocInput | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const slug = typeof raw.slug === "string" ? raw.slug.trim() : "";
+  const title_en = typeof raw.title_en === "string" ? raw.title_en.trim() : "";
+  if (!slug || !title_en) return null;
+
+  return {
+    slug,
+    title_en,
+    title_zh: typeof raw.title_zh === "string" ? raw.title_zh.trim() || null : null,
+    content_en: typeof raw.content_en === "string" ? raw.content_en : "",
+    content_zh: typeof raw.content_zh === "string" ? raw.content_zh : "",
+    sort_order: typeof raw.sort_order === "number" && Number.isFinite(raw.sort_order)
+      ? raw.sort_order
+      : null,
+    status: typeof raw.status === "string" && raw.status.trim() ? raw.status.trim() : "published",
+  };
+}
+
 export async function handleInternalPublishRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
   if (request.method !== "POST") return null;
+
+  if (path === "/v1/internal/publish/docs") {
+    const authError = await requireInternalPublisher(request, env);
+    if (authError) return authError;
+
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON");
+    }
+
+    const section_key = typeof body?.section_key === "string" ? body.section_key.trim() : "";
+    const section_title_en = typeof body?.section_title_en === "string" ? body.section_title_en.trim() : "";
+    const section_title_zh = typeof body?.section_title_zh === "string" ? body.section_title_zh.trim() || null : null;
+    const section_sort_order =
+      typeof body?.section_sort_order === "number" && Number.isFinite(body.section_sort_order)
+        ? body.section_sort_order
+        : 0;
+    const overwrite = typeof body?.overwrite === "boolean" ? body.overwrite : true;
+    const dry_run = typeof body?.dry_run === "boolean" ? body.dry_run : false;
+    const docs = Array.isArray(body?.docs)
+      ? body.docs
+          .map((item: any) => normalizeInternalDocInput(item))
+          .filter((item: InternalDocInput | null): item is InternalDocInput => Boolean(item))
+      : [];
+
+    if (!section_key) return badRequest("section_key is required");
+    if (!section_title_en) return badRequest("section_title_en is required");
+    if (!docs.length) return badRequest("docs must contain at least one valid item");
+
+    const existingSection = await env.DB.prepare(
+      "SELECT id FROM doc_sections WHERE key = ?"
+    ).bind(section_key).first<{ id: string }>();
+
+    const existingDocs = await Promise.all(
+      docs.map((doc: InternalDocInput) =>
+        env.DB.prepare(
+          "SELECT id, section_id FROM doc_items WHERE slug = ?"
+        ).bind(doc.slug).first<{ id: string; section_id: string }>()
+      )
+    );
+
+    if (!overwrite) {
+      const duplicate = existingDocs.find((row) => row?.id);
+      if (duplicate) return badRequest("one or more doc slugs already exist; set overwrite=true to replace them");
+    }
+
+    if (dry_run) {
+      return jsonResponse({
+        ok: true,
+        mode: "dry_run",
+        section_key,
+        section_exists: Boolean(existingSection),
+        docs: docs.map((doc: InternalDocInput, index: number) => ({
+          slug: doc.slug,
+          title_en: doc.title_en,
+          action: existingDocs[index]?.id ? "update" : "create",
+        })),
+      });
+    }
+
+    const ts = now();
+    const publisherId = "internal_publish_api";
+    const sectionId = existingSection?.id ?? uuid();
+
+    if (existingSection?.id) {
+      await env.DB.prepare(
+        "UPDATE doc_sections SET title_en = ?, title_zh = ?, sort_order = ? WHERE id = ?"
+      ).bind(section_title_en, section_title_zh, section_sort_order, sectionId).run();
+    } else {
+      await env.DB.prepare(
+        "INSERT INTO doc_sections (id, key, title_en, title_zh, sort_order) VALUES (?, ?, ?, ?, ?)"
+      ).bind(sectionId, section_key, section_title_en, section_title_zh, section_sort_order).run();
+    }
+
+    const results: Array<{ slug: string; id: string; action: "created" | "updated" }> = [];
+
+    for (let i = 0; i < docs.length; i += 1) {
+      const doc = docs[i];
+      const existing = existingDocs[i];
+      const sortOrder = doc.sort_order != null ? doc.sort_order : i + 1;
+      const status = doc.status || "published";
+
+      if (existing?.id) {
+        await env.DB.prepare(
+          "UPDATE doc_items SET section_id = ?, title_en = ?, title_zh = ?, content_en = ?, content_zh = ?, sort_order = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ?"
+        ).bind(
+          sectionId,
+          doc.title_en,
+          doc.title_zh,
+          doc.content_en ?? "",
+          doc.content_zh ?? "",
+          sortOrder,
+          status,
+          publisherId,
+          ts,
+          existing.id
+        ).run();
+        results.push({ slug: doc.slug, id: existing.id, action: "updated" });
+      } else {
+        const id = uuid();
+        await env.DB.prepare(
+          "INSERT INTO doc_items (id, section_id, slug, title_en, title_zh, content_en, content_zh, sort_order, status, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(
+          id,
+          sectionId,
+          doc.slug,
+          doc.title_en,
+          doc.title_zh,
+          doc.content_en ?? "",
+          doc.content_zh ?? "",
+          sortOrder,
+          status,
+          publisherId,
+          ts,
+          ts
+        ).run();
+        results.push({ slug: doc.slug, id, action: "created" });
+      }
+    }
+
+    return jsonResponse({
+      ok: true,
+      mode: "publish",
+      section: {
+        id: sectionId,
+        key: section_key,
+        created: !existingSection,
+      },
+      docs: results,
+    }, existingSection ? 200 : 201);
+  }
 
   if (path === "/v1/internal/publish/platform") {
     const authError = await requireInternalPublisher(request, env);
