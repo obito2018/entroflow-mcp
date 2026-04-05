@@ -719,6 +719,173 @@ function normalizeInternalDocInput(raw: any): InternalDocInput | null {
   };
 }
 
+type InternalPlatformGuideInput = {
+  platform_id: string;
+  version?: string | null;
+  title_en: string;
+  title_zh?: string | null;
+  content_en?: string | null;
+  content_zh?: string | null;
+  min_connector_version?: string | null;
+  max_connector_version?: string | null;
+};
+
+function normalizeInternalPlatformGuideInput(raw: any): InternalPlatformGuideInput | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const platform_id = typeof raw.platform_id === "string" ? raw.platform_id.trim() : "";
+  const title_en = typeof raw.title_en === "string" ? raw.title_en.trim() : "";
+  if (!platform_id || !title_en) return null;
+
+  return {
+    platform_id,
+    version: typeof raw.version === "string" ? raw.version.trim() || null : null,
+    title_en,
+    title_zh: typeof raw.title_zh === "string" ? raw.title_zh.trim() || null : null,
+    content_en: typeof raw.content_en === "string" ? raw.content_en : "",
+    content_zh: typeof raw.content_zh === "string" ? raw.content_zh : "",
+    min_connector_version:
+      typeof raw.min_connector_version === "string" ? raw.min_connector_version.trim() || null : null,
+    max_connector_version:
+      typeof raw.max_connector_version === "string" ? raw.max_connector_version.trim() || null : null,
+  };
+}
+
+async function resolveCanonicalPlatformId(inputPlatformId: string, env: Env): Promise<string | null> {
+  const exact = await env.DB.prepare(
+    "SELECT id FROM hardware_platforms WHERE id = ?"
+  ).bind(inputPlatformId).first<{ id: string }>();
+  if (exact?.id) return exact.id;
+
+  const normalized = inputPlatformId.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const canonical = await env.DB.prepare(
+    "SELECT id FROM hardware_platforms WHERE LOWER(id) = ?"
+  ).bind(normalized).first<{ id: string }>();
+  return canonical?.id ?? null;
+}
+
+async function upsertPublishedPlatformGuide(
+  env: Env,
+  guide: InternalPlatformGuideInput,
+  publisherId: string,
+  overwrite: boolean,
+): Promise<{
+  id: string;
+  platform_id: string;
+  version: string;
+  action: "created" | "updated";
+  manifest_r2_key: string;
+  connector_version: string | null;
+}> {
+  await ensurePlatformGuideTables(env);
+
+  const canonicalPlatformId = await resolveCanonicalPlatformId(guide.platform_id, env);
+  if (!canonicalPlatformId) {
+    throw new Error(`platform_id '${guide.platform_id}' is not registered`);
+  }
+
+  const connectorVersion = await getCurrentPlatformConnectorVersion(canonicalPlatformId, env);
+  const version = guide.version?.trim() || connectorVersion || "";
+  if (!version) {
+    throw new Error(`version is required for platform '${canonicalPlatformId}' because no connector version is published yet`);
+  }
+
+  if (!guide.content_en?.trim() && !guide.content_zh?.trim()) {
+    throw new Error(`platform '${canonicalPlatformId}' guide requires at least one locale content`);
+  }
+
+  const existing = await env.DB.prepare(
+    "SELECT * FROM platform_guides WHERE platform_id = ? AND version = ?"
+  ).bind(canonicalPlatformId, version).first<PlatformGuideRow>();
+
+  if (existing && !overwrite) {
+    throw new Error(`platform '${canonicalPlatformId}' guide version '${version}' already exists`);
+  }
+
+  const ts = now();
+  const id = existing?.id ?? uuid();
+  const action: "created" | "updated" = existing ? "updated" : "created";
+
+  if (existing) {
+    await env.DB.prepare(`
+      UPDATE platform_guides
+      SET title_en = ?,
+          title_zh = ?,
+          content_en = ?,
+          content_zh = ?,
+          min_connector_version = ?,
+          max_connector_version = ?,
+          status = 'published',
+          updated_by = ?,
+          updated_at = ?,
+          published_at = COALESCE(published_at, ?)
+      WHERE id = ?
+    `).bind(
+      guide.title_en,
+      guide.title_zh ?? null,
+      guide.content_en ?? "",
+      guide.content_zh ?? "",
+      guide.min_connector_version ?? null,
+      guide.max_connector_version ?? null,
+      publisherId,
+      ts,
+      ts,
+      id,
+    ).run();
+  } else {
+    await env.DB.prepare(`
+      INSERT INTO platform_guides (
+        id, platform_id, version, is_latest, title_en, title_zh, content_en, content_zh,
+        min_connector_version, max_connector_version, manifest_r2_key, status,
+        created_by, updated_by, created_at, updated_at, published_at
+      ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, 'published', ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      canonicalPlatformId,
+      version,
+      guide.title_en,
+      guide.title_zh ?? null,
+      guide.content_en ?? "",
+      guide.content_zh ?? "",
+      guide.min_connector_version ?? null,
+      guide.max_connector_version ?? null,
+      publisherId,
+      publisherId,
+      ts,
+      ts,
+      ts,
+    ).run();
+  }
+
+  await env.DB.prepare(
+    "UPDATE platform_guides SET is_latest = 0 WHERE platform_id = ? AND id != ?"
+  ).bind(canonicalPlatformId, id).run();
+  await env.DB.prepare(
+    "UPDATE platform_guides SET is_latest = 1, updated_by = ?, updated_at = ? WHERE id = ?"
+  ).bind(publisherId, now(), id).run();
+
+  const published = await getPlatformGuideById(env, id);
+  if (!published) {
+    throw new Error(`platform guide '${canonicalPlatformId}@${version}' was not found after upsert`);
+  }
+
+  const manifestKey = await publishPlatformGuideAssets(published, env);
+  await env.DB.prepare(
+    "UPDATE platform_guides SET manifest_r2_key = ?, updated_by = ?, updated_at = ? WHERE id = ?"
+  ).bind(manifestKey, publisherId, now(), id).run();
+
+  return {
+    id,
+    platform_id: canonicalPlatformId,
+    version,
+    action,
+    manifest_r2_key: manifestKey,
+    connector_version: connectorVersion,
+  };
+}
+
 export async function handleInternalPublishRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
   if (request.method !== "POST") return null;
 
@@ -853,6 +1020,89 @@ export async function handleInternalPublishRoutes(path: string, request: Request
       },
       docs: results,
     }, existingSection ? 200 : 201);
+  }
+
+  if (path === "/v1/internal/publish/platform-guides") {
+    const authError = await requireInternalPublisher(request, env);
+    if (authError) return authError;
+
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return badRequest("Invalid JSON");
+    }
+
+    const overwrite = typeof body?.overwrite === "boolean" ? body.overwrite : true;
+    const dry_run = typeof body?.dry_run === "boolean" ? body.dry_run : false;
+    const guides = Array.isArray(body?.guides)
+      ? body.guides
+          .map((item: any) => normalizeInternalPlatformGuideInput(item))
+          .filter((item: InternalPlatformGuideInput | null): item is InternalPlatformGuideInput => Boolean(item))
+      : [];
+
+    if (!guides.length) return badRequest("guides must contain at least one valid item");
+
+    const planned = [];
+    for (const guide of guides) {
+      const canonicalPlatformId = await resolveCanonicalPlatformId(guide.platform_id, env);
+      if (!canonicalPlatformId) {
+        return badRequest(`platform_id '${guide.platform_id}' is not registered`);
+      }
+
+      const connectorVersion = await getCurrentPlatformConnectorVersion(canonicalPlatformId, env);
+      const version = guide.version?.trim() || connectorVersion || "";
+      if (!version) {
+        return badRequest(`version is required for platform '${canonicalPlatformId}' because no connector version is published yet`);
+      }
+
+      if (!guide.content_en?.trim() && !guide.content_zh?.trim()) {
+        return badRequest(`platform '${canonicalPlatformId}' guide requires at least one locale content`);
+      }
+
+      const existing = await env.DB.prepare(
+        "SELECT id FROM platform_guides WHERE platform_id = ? AND version = ?"
+      ).bind(canonicalPlatformId, version).first<{ id: string }>();
+
+      if (existing && !overwrite) {
+        return badRequest(`platform '${canonicalPlatformId}' guide version '${version}' already exists; set overwrite=true to replace it`);
+      }
+
+      planned.push({
+        platform_id: canonicalPlatformId,
+        requested_platform_id: guide.platform_id,
+        version,
+        connector_version: connectorVersion,
+        action: existing ? "update" : "create",
+        locales: [
+          ...(guide.content_en?.trim() ? ["en"] : []),
+          ...(guide.content_zh?.trim() ? ["zh"] : []),
+        ],
+      });
+    }
+
+    if (dry_run) {
+      return jsonResponse({
+        ok: true,
+        mode: "dry_run",
+        overwrite,
+        guides: planned,
+      });
+    }
+
+    const publisherId = "internal_publish_api";
+    const results = [];
+    for (const guide of guides) {
+      const result = await upsertPublishedPlatformGuide(env, guide, publisherId, overwrite);
+      results.push(result);
+    }
+
+    return jsonResponse({
+      ok: true,
+      mode: "publish",
+      overwrite,
+      guides: results,
+    }, 201);
   }
 
   if (path === "/v1/internal/publish/platform") {
