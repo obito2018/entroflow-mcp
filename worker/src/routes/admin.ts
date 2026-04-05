@@ -1,5 +1,14 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, unauthorized, badRequest, forbidden, uuid, now, signJwt, verifyJwt, hashPassword, verifyPassword, getAuthToken } from "../lib/utils";
+import {
+  buildPlatformGuideManifest,
+  ensurePlatformGuideTables,
+  getLatestPublishedPlatformGuide,
+  getPlatformGuideLocaleKey,
+  getPlatformGuideManifestKey,
+  isConnectorVersionSupported,
+  PlatformGuideRow,
+} from "../lib/platform_guides";
 import JSZip from "jszip";
 
 async function requireAdmin(request: Request, env: Env): Promise<{ id: string; role: string } | Response> {
@@ -589,6 +598,86 @@ async function syncDeviceVersionAssets(deviceId: string, versionId: string, env:
   }
 }
 
+function getPlatformGuideLocales(row: Pick<PlatformGuideRow, "content_en" | "content_zh">): string[] {
+  return [
+    ...(row.content_en?.trim() ? ["en"] : []),
+    ...(row.content_zh?.trim() ? ["zh"] : []),
+  ];
+}
+
+async function getCurrentPlatformConnectorVersion(platformId: string, env: Env): Promise<string | null> {
+  const latest = await env.ASSETS.get(`platforms/${platformId}/latest.json`);
+  if (!latest) return null;
+  try {
+    const payload = await latest.json() as { version?: string | null };
+    return typeof payload?.version === "string" && payload.version.trim() ? payload.version.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function summarizePlatformGuide(row: PlatformGuideRow | null, connectorVersion: string | null) {
+  if (!row) {
+    return {
+      has_published_guide: false,
+      guide_version: null,
+      guide_updated_at: null,
+      guide_locales: [],
+      guide_compatible_with_connector: null,
+      guide_warning: "No published platform guide yet. Connect can proceed, but guide sync will be skipped until one is published.",
+    };
+  }
+
+  const compatible = isConnectorVersionSupported(
+    connectorVersion,
+    row.min_connector_version,
+    row.max_connector_version,
+  );
+
+  return {
+    has_published_guide: true,
+    guide_version: row.version,
+    guide_updated_at: row.published_at ?? row.updated_at,
+    guide_locales: getPlatformGuideLocales(row),
+    guide_compatible_with_connector: compatible,
+    guide_warning: compatible
+      ? null
+      : `Latest published guide v${row.version} is outside connector compatibility range for connector v${connectorVersion}.`,
+  };
+}
+
+async function getPlatformGuideById(env: Env, id: string): Promise<PlatformGuideRow | null> {
+  await ensurePlatformGuideTables(env);
+  return env.DB.prepare("SELECT * FROM platform_guides WHERE id = ?").bind(id).first<PlatformGuideRow>();
+}
+
+async function publishPlatformGuideAssets(row: PlatformGuideRow, env: Env): Promise<string> {
+  const manifestKey = getPlatformGuideManifestKey(row.platform_id);
+  const manifest = buildPlatformGuideManifest(row);
+
+  if (row.content_en?.trim()) {
+    await env.ASSETS.put(
+      getPlatformGuideLocaleKey(row.platform_id, row.version, "en"),
+      row.content_en,
+      { httpMetadata: { contentType: "text/markdown; charset=utf-8" } }
+    );
+  }
+
+  if (row.content_zh?.trim()) {
+    await env.ASSETS.put(
+      getPlatformGuideLocaleKey(row.platform_id, row.version, "zh"),
+      row.content_zh,
+      { httpMetadata: { contentType: "text/markdown; charset=utf-8" } }
+    );
+  }
+
+  await env.ASSETS.put(manifestKey, JSON.stringify(manifest, null, 2), {
+    httpMetadata: { contentType: "application/json" },
+  });
+
+  return manifestKey;
+}
+
 async function requireInternalPublisher(request: Request, env: Env): Promise<Response | null> {
   const configuredSecret = env.INTERNAL_PUBLISH_SECRET?.trim();
   if (!configuredSecret) return forbidden("Internal publish API is not configured");
@@ -1025,6 +1114,7 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
 
   const admin = await requireAdmin(request, env);
   if (admin instanceof Response) return admin;
+  await ensurePlatformGuideTables(env);
 
   // GET /v1/admin/stats
   if (path === "/v1/admin/stats" && request.method === "GET") {
@@ -1133,9 +1223,15 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
         env.DB.prepare(`SELECT * FROM hardware_platforms WHERE ${where} ORDER BY sort_order ASC, created_at DESC LIMIT ? OFFSET ?`).bind(...bindings, limit, offset).all(),
         env.DB.prepare(`SELECT COUNT(*) as c FROM hardware_platforms WHERE ${where}`).bind(...bindings).first<{ c: number }>(),
       ]);
-      const normalizedItems = items.results.map((item: any) => ({
-        ...item,
-        aliases: normalizeAliases(item.aliases),
+      const normalizedItems = await Promise.all(items.results.map(async (item: any) => {
+        const connectorVersion = await getCurrentPlatformConnectorVersion(item.id, env);
+        const latestGuide = await getLatestPublishedPlatformGuide(env, item.id);
+        return {
+          ...item,
+          aliases: normalizeAliases(item.aliases),
+          connector_version: connectorVersion,
+          ...summarizePlatformGuide(latestGuide, connectorVersion),
+        };
       }));
       return jsonResponse({ items: normalizedItems, total: count?.c ?? 0, page, limit });
     }
@@ -1184,6 +1280,194 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
   }
 
   // ── Device Management ────────────────────────────────────────────────────
+
+  const platformGuides = path.match(/^\/v1\/admin\/platforms\/([^/]+)\/guides$/);
+  if (platformGuides) {
+    const platformId = platformGuides[1];
+
+    if (request.method === "GET") {
+      const platform = await env.DB.prepare("SELECT id FROM hardware_platforms WHERE id = ?").bind(platformId).first<{ id: string }>();
+      if (!platform) return notFound(`Platform '${platformId}' not found`);
+
+      const connectorVersion = await getCurrentPlatformConnectorVersion(platformId, env);
+      const { results } = await env.DB.prepare(`
+        SELECT *
+        FROM platform_guides
+        WHERE platform_id = ?
+        ORDER BY is_latest DESC, published_at DESC, updated_at DESC
+      `).bind(platformId).all();
+
+      return jsonResponse({
+        connector_version: connectorVersion,
+        items: (results as PlatformGuideRow[]).map((row: PlatformGuideRow) => ({
+          ...row,
+          locales: getPlatformGuideLocales(row),
+          connector_compatible: isConnectorVersionSupported(
+            connectorVersion,
+            row.min_connector_version,
+            row.max_connector_version,
+          ),
+        })),
+      });
+    }
+
+    if (request.method === "POST") {
+      let body: any;
+      try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
+
+      const platform = await env.DB.prepare("SELECT id FROM hardware_platforms WHERE id = ?").bind(platformId).first<{ id: string }>();
+      if (!platform) return notFound(`Platform '${platformId}' not found`);
+
+      const version = typeof body?.version === "string" ? body.version.trim() : "";
+      const title_en = typeof body?.title_en === "string" ? body.title_en.trim() : "";
+      const title_zh = typeof body?.title_zh === "string" ? body.title_zh.trim() || null : null;
+      const content_en = typeof body?.content_en === "string" ? body.content_en : "";
+      const content_zh = typeof body?.content_zh === "string" ? body.content_zh : "";
+      const min_connector_version = typeof body?.min_connector_version === "string" ? body.min_connector_version.trim() || null : null;
+      const max_connector_version = typeof body?.max_connector_version === "string" ? body.max_connector_version.trim() || null : null;
+      const status = typeof body?.status === "string" && body.status.trim() ? body.status.trim() : "draft";
+
+      if (!version) return badRequest("version is required");
+      if (!title_en) return badRequest("title_en is required");
+      if (status === "published") return badRequest("Use the publish endpoint to publish a platform guide");
+
+      const existing = await env.DB.prepare(
+        "SELECT id FROM platform_guides WHERE platform_id = ? AND version = ?"
+      ).bind(platformId, version).first<{ id: string }>();
+      if (existing) return badRequest("Guide version already exists for this platform");
+
+      const id = uuid();
+      const ts = now();
+      await env.DB.prepare(`
+        INSERT INTO platform_guides (
+          id, platform_id, version, is_latest, title_en, title_zh, content_en, content_zh,
+          min_connector_version, max_connector_version, manifest_r2_key, status,
+          created_by, updated_by, created_at, updated_at, published_at
+        ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL)
+      `).bind(
+        id,
+        platformId,
+        version,
+        title_en,
+        title_zh,
+        content_en,
+        content_zh,
+        min_connector_version,
+        max_connector_version,
+        status,
+        admin.id,
+        admin.id,
+        ts,
+        ts,
+      ).run();
+
+      return jsonResponse({ id }, 201);
+    }
+  }
+
+  const platformGuideById = path.match(/^\/v1\/admin\/platform-guides\/([^/]+)$/);
+  if (platformGuideById) {
+    const guideId = platformGuideById[1];
+
+    if (request.method === "PUT") {
+      let body: any;
+      try { body = await request.json(); } catch { return badRequest("Invalid JSON"); }
+
+      const current = await getPlatformGuideById(env, guideId);
+      if (!current) return notFound(`Platform guide '${guideId}' not found`);
+
+      const title_en = typeof body?.title_en === "string" ? body.title_en.trim() : null;
+      const title_zh = typeof body?.title_zh === "string" ? body.title_zh.trim() || null : undefined;
+      const content_en = typeof body?.content_en === "string" ? body.content_en : undefined;
+      const content_zh = typeof body?.content_zh === "string" ? body.content_zh : undefined;
+      const min_connector_version = typeof body?.min_connector_version === "string" ? body.min_connector_version.trim() || null : undefined;
+      const max_connector_version = typeof body?.max_connector_version === "string" ? body.max_connector_version.trim() || null : undefined;
+      const status = typeof body?.status === "string" && body.status.trim() ? body.status.trim() : undefined;
+
+      if (status === "published" && current.status !== "published") {
+        return badRequest("Use the publish endpoint to publish a platform guide");
+      }
+
+      await env.DB.prepare(`
+        UPDATE platform_guides
+        SET title_en = COALESCE(?, title_en),
+            title_zh = COALESCE(?, title_zh),
+            content_en = COALESCE(?, content_en),
+            content_zh = COALESCE(?, content_zh),
+            min_connector_version = COALESCE(?, min_connector_version),
+            max_connector_version = COALESCE(?, max_connector_version),
+            status = COALESCE(?, status),
+            updated_by = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        title_en,
+        title_zh === undefined ? null : title_zh,
+        content_en ?? null,
+        content_zh ?? null,
+        min_connector_version === undefined ? null : min_connector_version,
+        max_connector_version === undefined ? null : max_connector_version,
+        status ?? null,
+        admin.id,
+        now(),
+        guideId,
+      ).run();
+
+      return jsonResponse({ success: true });
+    }
+
+    if (request.method === "DELETE") {
+      const current = await getPlatformGuideById(env, guideId);
+      if (!current) return notFound(`Platform guide '${guideId}' not found`);
+      if (current.is_latest) return badRequest("Unpublish or replace the latest guide before deleting it");
+      await env.DB.prepare("DELETE FROM platform_guides WHERE id = ?").bind(guideId).run();
+      return jsonResponse({ success: true });
+    }
+  }
+
+  const publishPlatformGuide = path.match(/^\/v1\/admin\/platform-guides\/([^/]+)\/publish$/);
+  if (publishPlatformGuide && request.method === "POST") {
+    const guideId = publishPlatformGuide[1];
+    const current = await getPlatformGuideById(env, guideId);
+    if (!current) return notFound(`Platform guide '${guideId}' not found`);
+    if (!current.content_en.trim() && !current.content_zh.trim()) {
+      return badRequest("At least one guide content locale is required");
+    }
+
+    const ts = now();
+    await env.DB.prepare(
+      "UPDATE platform_guides SET is_latest = 0 WHERE platform_id = ?"
+    ).bind(current.platform_id).run();
+    await env.DB.prepare(`
+      UPDATE platform_guides
+      SET status = 'published',
+          is_latest = 1,
+          updated_by = ?,
+          updated_at = ?,
+          published_at = COALESCE(published_at, ?)
+      WHERE id = ?
+    `).bind(admin.id, ts, ts, guideId).run();
+
+    const published = await getPlatformGuideById(env, guideId);
+    if (!published) return notFound(`Platform guide '${guideId}' not found after publish`);
+    const manifestKey = await publishPlatformGuideAssets(published, env);
+    await env.DB.prepare(
+      "UPDATE platform_guides SET manifest_r2_key = ?, updated_by = ?, updated_at = ? WHERE id = ?"
+    ).bind(manifestKey, admin.id, now(), guideId).run();
+
+    const connectorVersion = await getCurrentPlatformConnectorVersion(published.platform_id, env);
+    return jsonResponse({
+      success: true,
+      id: guideId,
+      manifest_r2_key: manifestKey,
+      connector_version: connectorVersion,
+      connector_compatible: isConnectorVersionSupported(
+        connectorVersion,
+        published.min_connector_version,
+        published.max_connector_version,
+      ),
+    });
+  }
 
   if (path === "/v1/admin/devices") {
     if (request.method === "GET") {
@@ -1259,9 +1543,12 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
   if (platformConnector) {
     const platformId = platformConnector[1];
     if (request.method === "GET") {
-      const latest = await env.ASSETS.get(`platforms/${platformId}/latest.json`);
-      if (!latest) return jsonResponse({ version: null });
-      return jsonResponse(await latest.json());
+      const version = await getCurrentPlatformConnectorVersion(platformId, env);
+      const latestGuide = await getLatestPublishedPlatformGuide(env, platformId);
+      return jsonResponse({
+        version,
+        ...summarizePlatformGuide(latestGuide, version),
+      });
     }
     if (request.method === "POST") {
       const formData = await request.formData();
@@ -1286,7 +1573,13 @@ export async function handleAdminRoutes(path: string, request: Request, env: Env
       // Sync device list
       await syncDeviceList(platformId, env);
 
-      return jsonResponse({ success: true, version, r2_key: zipKey }, 201);
+      const latestGuide = await getLatestPublishedPlatformGuide(env, platformId);
+      return jsonResponse({
+        success: true,
+        version,
+        r2_key: zipKey,
+        ...summarizePlatformGuide(latestGuide, version),
+      }, 201);
     }
   }
 

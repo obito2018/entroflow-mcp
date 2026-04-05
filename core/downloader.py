@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import io
 import json
+import locale
 import os
 import zipfile
 from pathlib import Path
@@ -12,6 +13,7 @@ from core.config import get_install_id
 API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://api.entroflow.ai/api")
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 CATALOG_PATH = ASSETS_DIR / "catalog.json"
+PLATFORM_DOCS_DIR = Path.home() / ".entroflow" / "docs" / "platforms"
 
 
 def _params() -> dict:
@@ -86,6 +88,124 @@ def refresh_catalog() -> dict:
         encoding="utf-8",
     )
     return catalog
+
+
+def _guide_manifest_path(platform: str) -> Path:
+    return PLATFORM_DOCS_DIR / f"{platform}.manifest.json"
+
+
+def _guide_markdown_path(platform: str) -> Path:
+    return PLATFORM_DOCS_DIR / f"{platform}.md"
+
+
+def _read_cached_guide_manifest(platform: str) -> dict | None:
+    path = _guide_manifest_path(platform)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _preferred_guide_locale() -> str:
+    lang, _encoding = locale.getdefaultlocale()
+    if isinstance(lang, str) and lang.lower().startswith("zh"):
+        return "zh"
+    return "en"
+
+
+def get_platform_guide_latest(platform: str) -> dict | None:
+    url = f"{API_BASE}/platform-guides/{platform}/latest"
+    resp = httpx.get(url, params=_params(), timeout=10)
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def download_platform_guide(platform: str, preferred_locale: str = "auto") -> dict | None:
+    manifest = get_platform_guide_latest(platform)
+    if not manifest:
+        return None
+
+    locales = [str(item).strip() for item in manifest.get("locales", []) if str(item).strip()]
+    if not locales:
+        return None
+
+    preferred = _preferred_guide_locale() if preferred_locale == "auto" else preferred_locale.strip().lower()
+    selected_locale = preferred if preferred in locales else ("en" if "en" in locales else locales[0])
+    cached_manifest = _read_cached_guide_manifest(platform)
+    guide_path = _guide_markdown_path(platform)
+    manifest_path = _guide_manifest_path(platform)
+
+    if (
+        cached_manifest
+        and cached_manifest.get("version") == manifest.get("version")
+        and cached_manifest.get("selected_locale") == selected_locale
+        and guide_path.exists()
+    ):
+        return {
+            "status": "cached",
+            "platform_id": platform,
+            "version": manifest.get("version"),
+            "locale": selected_locale,
+            "path": str(guide_path),
+        }
+
+    url = f"{API_BASE}/platform-guides/{platform}/{manifest['version']}/{selected_locale}"
+    resp = httpx.get(url, params=_params(), timeout=10)
+    resp.raise_for_status()
+
+    PLATFORM_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    guide_path.write_text(resp.text, encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                **manifest,
+                "selected_locale": selected_locale,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    return {
+        "status": "synced",
+        "platform_id": platform,
+        "version": manifest.get("version"),
+        "locale": selected_locale,
+        "path": str(guide_path),
+    }
+
+
+def refresh_platform_guides(platforms: list[str], preferred_locale: str = "auto") -> list[dict]:
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for raw_platform in platforms:
+        platform = str(raw_platform).strip()
+        if not platform or platform in seen:
+            continue
+        seen.add(platform)
+        try:
+            synced = download_platform_guide(platform, preferred_locale=preferred_locale)
+            if synced:
+                results.append(synced)
+            else:
+                results.append({
+                    "status": "missing",
+                    "platform_id": platform,
+                })
+        except Exception as exc:
+            results.append({
+                "status": "error",
+                "platform_id": platform,
+                "error": str(exc),
+            })
+
+    return results
 
 
 def get_server_latest_version() -> str:

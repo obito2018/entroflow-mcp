@@ -1,5 +1,6 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, badRequest, uuid, now, getAuthToken, verifyJwt } from "../lib/utils";
+import { ensurePlatformGuideTables, getLatestPublishedPlatformGuide } from "../lib/platform_guides";
 
 async function ensureAgentInstallTables(env: Env): Promise<void> {
   await env.DB.prepare(`
@@ -103,6 +104,7 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
 
   // GET /v1/platforms
   if (path === "/v1/platforms" && request.method === "GET") {
+    await ensurePlatformGuideTables(env);
     const url = new URL(request.url);
     const lang = url.searchParams.get("lang") || "en";
     const { results } = await env.DB.prepare(`
@@ -116,12 +118,26 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
       GROUP BY p.id
       ORDER BY p.sort_order ASC, p.name_en ASC
     `).all();
-    return jsonResponse(results);
+    const withGuideMeta = await Promise.all(results.map(async (platform: any) => {
+      const latestGuide = await getLatestPublishedPlatformGuide(env, platform.id);
+      return {
+        ...platform,
+        has_published_guide: Boolean(latestGuide),
+        guide_version: latestGuide?.version ?? null,
+        guide_updated_at: latestGuide?.published_at ?? latestGuide?.updated_at ?? null,
+        guide_locales: [
+          ...(latestGuide?.content_en?.trim() ? ["en"] : []),
+          ...(latestGuide?.content_zh?.trim() ? ["zh"] : []),
+        ],
+      };
+    }));
+    return jsonResponse(withGuideMeta);
   }
 
   // GET /v1/platforms/:id
   const platformDetail = path.match(/^\/v1\/platforms\/([^/]+)$/);
   if (platformDetail && request.method === "GET") {
+    await ensurePlatformGuideTables(env);
     const id = platformDetail[1];
     const platform = await env.DB.prepare(`
       SELECT p.*, COUNT(d.id) as device_count
@@ -131,7 +147,17 @@ export async function handlePublicRoutes(path: string, request: Request, env: En
       GROUP BY p.id
     `).bind(id).first();
     if (!platform) return notFound(`Platform '${id}' not found`);
-    return jsonResponse(platform);
+    const latestGuide = await getLatestPublishedPlatformGuide(env, id);
+    return jsonResponse({
+      ...platform,
+      has_published_guide: Boolean(latestGuide),
+      guide_version: latestGuide?.version ?? null,
+      guide_updated_at: latestGuide?.published_at ?? latestGuide?.updated_at ?? null,
+      guide_locales: [
+        ...(latestGuide?.content_en?.trim() ? ["en"] : []),
+        ...(latestGuide?.content_zh?.trim() ? ["zh"] : []),
+      ],
+    });
   }
 
   // GET /v1/devices

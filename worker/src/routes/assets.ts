@@ -1,5 +1,6 @@
 import { Env } from "../lib/types";
 import { jsonResponse, notFound, uuid, now } from "../lib/utils";
+import { getPlatformGuideLocaleKey, getPlatformGuideManifestKey } from "../lib/platform_guides";
 
 const MARKDOWN_RESPONSE_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -205,6 +206,28 @@ export async function handleAssetRoutes(path: string, request: Request, env: Env
     const contentType = obj.httpMetadata?.contentType || "application/octet-stream";
     return new Response(obj.body, {
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": contentType, "Cache-Control": "public, max-age=31536000" },
+    });
+  }
+
+  // GET /api/platform-guides/{platform}/latest
+  const platformGuideLatest = path.match(/^\/api\/platform-guides\/([^/]+)\/latest$/);
+  if (platformGuideLatest) {
+    const platform = platformGuideLatest[1];
+    const obj = await env.ASSETS.get(getPlatformGuideManifestKey(platform));
+    if (!obj) return notFound(`Guide for platform '${platform}' not found`);
+    return new Response(await obj.text(), {
+      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Cache-Control": "no-cache" },
+    });
+  }
+
+  // GET /api/platform-guides/{platform}/{version}/{locale}
+  const platformGuideLocale = path.match(/^\/api\/platform-guides\/([^/]+)\/([^/]+)\/(en|zh)$/);
+  if (platformGuideLocale) {
+    const [, platform, version, locale] = platformGuideLocale;
+    const obj = await env.ASSETS.get(getPlatformGuideLocaleKey(platform, version, locale as "en" | "zh"));
+    if (!obj) return notFound(`Guide locale '${locale}' for platform '${platform}' v${version} not found`);
+    return new Response(await obj.text(), {
+      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-cache" },
     });
   }
 

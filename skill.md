@@ -34,13 +34,15 @@ Before connecting a platform, read the matching local platform guide at:
 ~/.entroflow/docs/platforms/<platform>.md
 ```
 
-If the platform appears in `entroflow list-platforms` but the local guide is missing, run:
+`entroflow connect <platform>` now syncs the latest published platform guide from the server automatically before login starts.
+
+If you want to refresh guides in advance for already connected platforms, run:
 
 ```bash
 entroflow update
 ```
 
-If the guide is still missing after `entroflow update`, stop and tell the user that the platform guide has not been published locally yet.
+If the guide is still missing after `entroflow connect` or `entroflow update`, tell the user the platform-specific guide has not been published yet and continue only if they still want to proceed.
 
 Connect a platform:
 
@@ -93,26 +95,25 @@ For a brand new user or a new platform, always follow this order:
 
 1. Run `entroflow list-platforms [query]`.
 2. Identify the exact platform id.
-3. Read `~/.entroflow/docs/platforms/<platform>.md`.
-4. If that local platform guide is missing, run `entroflow update` before proceeding.
-5. If the guide is still missing after update, stop and tell the user the platform guide is not published locally yet.
-6. Run `entroflow connect <platform>`.
-7. Run `entroflow list-devices`.
-8. Ask the user which exact device should be set up.
-9. Ask the user to confirm:
+3. Run `entroflow connect <platform>`.
+4. Read `~/.entroflow/docs/platforms/<platform>.md` if it was synced locally.
+5. If the guide is not available after connect, tell the user the platform-specific guide has not been published yet.
+6. Run `entroflow list-devices`.
+7. Ask the user which exact device should be set up.
+8. Ask the user to confirm:
    - `name`
    - `location`
    - `remark`
-10. Run `entroflow setup ...`.
-11. After setup succeeds, switch to MCP runtime tools.
+9. Run `entroflow setup ...`.
+10. After setup succeeds, switch to MCP runtime tools.
 
 ## Important Rules
 
 1. Do not use MCP for installation, login, discovery, or updates.
 2. Do not invent `name`, `location`, or `remark`. Ask the user.
 3. Do not assume a platform id. Always confirm it with `entroflow list-platforms`.
-4. If a platform is listed but its local guide is missing, run `entroflow update` before connecting it.
-5. If the guide is still missing after update, stop and tell the user the platform guide is not published locally yet.
+4. `entroflow connect <platform>` will sync the latest published platform guide automatically when one exists.
+5. If the guide is still missing after `connect` or `update`, tell the user the platform guide is not published yet and ask whether they want to continue without it.
 6. If the user only needs the resource package, use `entroflow download`.
 7. If the user wants the device to become callable through MCP, use `entroflow setup`.
 8. If runtime tools say a device is missing, go back to the CLI setup flow.

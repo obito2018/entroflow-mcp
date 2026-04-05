@@ -54,6 +54,20 @@ def _platform_doc_path(platform_id: str) -> Path:
     return PLATFORM_DOCS_DIR / f"{platform_id}.md"
 
 
+def _platform_doc_manifest_path(platform_id: str) -> Path:
+    return PLATFORM_DOCS_DIR / f"{platform_id}.manifest.json"
+
+
+def _load_cached_platform_doc_manifest(platform_id: str) -> dict | None:
+    path = _platform_doc_manifest_path(platform_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def _open_browser(url: str) -> bool:
     try:
         return bool(webbrowser.open(url, new=2))
@@ -118,8 +132,16 @@ def cmd_list_platforms(args: argparse.Namespace) -> int:
         aliases = [str(item) for item in entry.get("aliases", []) if str(item).strip()]
         description = str(entry.get("description", "")).strip()
         doc_path = _platform_doc_path(platform_id)
+        cached_manifest = _load_cached_platform_doc_manifest(platform_id)
         doc_ready = doc_path.exists()
         status = "connected" if platform_id in connected else "available"
+        remote_manifest = None
+        remote_error = None
+
+        try:
+            remote_manifest = downloader.get_platform_guide_latest(platform_id)
+        except Exception as exc:
+            remote_error = str(exc)
 
         _print(f"- {platform_id} ({display_name})")
         _print(f"  status     : {status}")
@@ -128,18 +150,34 @@ def cmd_list_platforms(args: argparse.Namespace) -> int:
         if aliases:
             _print(f"  aliases    : {', '.join(aliases)}")
         _print(f"  connect    : entroflow connect {platform_id}")
-        if doc_ready:
-            _print(f"  doc        : {doc_path}")
+        if doc_ready and cached_manifest and remote_manifest and cached_manifest.get("version") == remote_manifest.get("version"):
+            locale_name = cached_manifest.get("selected_locale") or "unknown"
+            _print(f"  doc        : cached locally ({doc_path}, v{cached_manifest.get('version')}, {locale_name})")
+        elif doc_ready and cached_manifest:
+            latest_version = remote_manifest.get("version") if isinstance(remote_manifest, dict) else None
+            if latest_version and cached_manifest.get("version") != latest_version:
+                _print(f"  doc        : cached locally ({doc_path}, v{cached_manifest.get('version')}; latest on server: v{latest_version})")
+            else:
+                _print(f"  doc        : cached locally ({doc_path})")
+        elif doc_ready:
+            _print(f"  doc        : cached locally ({doc_path})")
+        elif remote_manifest:
+            missing_docs = True
+            locales = ", ".join(remote_manifest.get("locales", [])) or "unknown locales"
+            _print(f"  doc        : available on server (v{remote_manifest.get('version')}, {locales})")
+            _print("  next       : guide will be synced automatically during `entroflow connect`")
+        elif remote_error:
+            missing_docs = True
+            _print(f"  doc        : guide check failed ({remote_error})")
         else:
             missing_docs = True
-            _print(f"  doc        : missing locally ({doc_path})")
-            _print("  next       : run `entroflow update` to sync the latest platform docs")
-            _print("  note       : if the doc is still missing after update, the guide has not been published locally yet")
+            _print("  doc        : not published on server yet")
+            _print("  note       : platform connection can continue, but no local guide will be synced")
         _print("")
 
     if missing_docs:
-        _print("Some platform docs are missing locally. Run `entroflow update` before connecting a newly added platform.")
-        _print("If a doc is still missing after update, stop and tell the user that the platform guide is not published yet.")
+        _print("Platform guides are now synced on demand from the server.")
+        _print("If a guide is not published yet, `entroflow connect <platform>` will continue without a local guide.")
     return 0
 
 
@@ -148,6 +186,22 @@ def cmd_connect(args: argparse.Namespace) -> int:
     platform = _resolve_platform_or_exit(args.platform)
 
     _print(f"Connecting platform: {platform}")
+
+    try:
+        guide_sync = downloader.download_platform_guide(platform)
+        if guide_sync:
+            guide_status = guide_sync.get("status")
+            guide_version = guide_sync.get("version")
+            guide_locale = guide_sync.get("locale")
+            guide_path = guide_sync.get("path")
+            if guide_status == "cached":
+                _print(f"Platform guide already up to date: {guide_path} (v{guide_version}, {guide_locale})")
+            else:
+                _print(f"Synced platform guide: {guide_path} (v{guide_version}, {guide_locale})")
+        else:
+            _print("No published platform guide is available on the server yet. Continuing without a local guide.")
+    except Exception as exc:
+        _print(f"Platform guide sync skipped: {exc}")
 
     connector_dir = ASSETS_DIR / platform / "connector"
     devices_file = connector_dir / f"{platform}_devices.json"
@@ -362,6 +416,22 @@ def cmd_update(_: argparse.Namespace) -> int:
         _print("Platform catalog refreshed.")
     except Exception as exc:
         _print(f"Platform catalog refresh failed: {exc}")
+
+    connected_platforms = config.get_connected_platforms()
+    if connected_platforms:
+        _print("")
+        _print("Platform guides:")
+        for result in downloader.refresh_platform_guides(connected_platforms):
+            status = result.get("status")
+            platform = result.get("platform_id", "?")
+            if status in {"cached", "synced"}:
+                _print(
+                    f"  {platform}: {status} v{result.get('version')} ({result.get('locale')}) -> {result.get('path')}"
+                )
+            elif status == "missing":
+                _print(f"  {platform}: guide not published on server")
+            else:
+                _print(f"  {platform}: guide refresh failed ({result.get('error')})")
     return 0
 
 

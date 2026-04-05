@@ -147,6 +147,30 @@ CREATE TABLE IF NOT EXISTS doc_items (
 CREATE INDEX IF NOT EXISTS idx_doc_items_section ON doc_items(section_id);
 CREATE INDEX IF NOT EXISTS idx_doc_items_status ON doc_items(status);
 
+CREATE TABLE IF NOT EXISTS platform_guides (
+  id                    TEXT PRIMARY KEY,
+  platform_id           TEXT NOT NULL REFERENCES hardware_platforms(id),
+  version               TEXT NOT NULL,
+  is_latest             INTEGER NOT NULL DEFAULT 0,
+  title_en              TEXT NOT NULL,
+  title_zh              TEXT,
+  content_en            TEXT NOT NULL DEFAULT '',
+  content_zh            TEXT NOT NULL DEFAULT '',
+  min_connector_version TEXT,
+  max_connector_version TEXT,
+  manifest_r2_key       TEXT,
+  status                TEXT NOT NULL DEFAULT 'draft',
+  created_by            TEXT NOT NULL,
+  updated_by            TEXT,
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL,
+  published_at          INTEGER,
+  UNIQUE(platform_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_guides_platform ON platform_guides(platform_id);
+CREATE INDEX IF NOT EXISTS idx_platform_guides_latest ON platform_guides(platform_id, is_latest);
+CREATE INDEX IF NOT EXISTS idx_platform_guides_status ON platform_guides(status);
+
 -- 反馈表
 CREATE TABLE IF NOT EXISTS feedback (
   id          TEXT PRIMARY KEY,
