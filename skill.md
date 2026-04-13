@@ -1,3 +1,10 @@
+---
+name: entroflow
+description: Use when an agent needs to connect platforms and set up EntroFlow devices through the local CLI before using the runtime MCP tools for device_search, device_status, and device_control.
+metadata:
+  short-description: Connect and set up EntroFlow devices
+---
+
 # EntroFlow Skill Guide
 
 EntroFlow connects an agent to physical devices.
