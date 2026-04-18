@@ -25,7 +25,7 @@ mcp = FastMCP(
         "- device_search(query): find registered devices and inspect supported actions.\n"
         "- device_status(device_id): read the current device state.\n"
         "- device_control(device_id, action): execute a runtime action.\n"
-        "Action names are driver-specific. Inspect supported_actions from device_search before calling device_control.\n"
+        "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
         "Do not attempt installation, login, discovery, or updates through MCP."
     ),
 )

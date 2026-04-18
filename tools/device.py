@@ -3,7 +3,7 @@ from core import loader, store
 
 
 def device_search(query: str) -> str:
-    """Search registered devices. Use 'all' to list everything."""
+    """Search registered devices. Use 'all' to list everything and inspect supported_actions before control."""
     devices = store.load()
     if not devices:
         return (
@@ -64,7 +64,7 @@ def device_status(device_id: str) -> str:
 
 
 def device_control(device_id: str, action) -> str:
-    """Execute a runtime action on a registered device."""
+    """Execute a runtime action on a registered device. Run device_search first to inspect supported_actions."""
     record = store.find(device_id)
     if not record:
         return f"Device '{device_id}' was not found. Use device_search first."
