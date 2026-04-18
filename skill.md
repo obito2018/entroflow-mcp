@@ -42,6 +42,7 @@ Before connecting a platform, read the matching local platform guide at:
 ```
 
 `entroflow connect <platform>` now syncs the latest published platform guide from the server automatically before login starts.
+It also refreshes the local platform device support table for that platform.
 
 If you want to refresh guides in advance for already connected platforms, run:
 
@@ -117,7 +118,8 @@ For a brand new user or a new platform, always follow this order:
    - `location`
    - `remark`
 9. Run `entroflow setup ...`.
-10. After setup succeeds, switch to MCP runtime tools.
+10. Before the first runtime control of a specific device, run `device_search("<device_id>")` or an equivalent exact lookup and inspect `supported_actions`.
+11. After confirming the supported action names for that specific device, switch to MCP runtime tools.
 
 ## Important Rules
 
@@ -128,8 +130,11 @@ For a brand new user or a new platform, always follow this order:
 5. If the guide is still missing after `connect` or `update`, tell the user the platform guide is not published yet and ask whether they want to continue without it.
 6. If the user only needs the resource package, use `entroflow download`.
 7. If the user wants the device to become callable through MCP, use `entroflow setup`.
-8. If runtime tools say a device is missing, go back to the CLI setup flow.
-9. If the user wants to add another device on an already connected platform, use:
+8. `entroflow connect <platform>` and `entroflow update` both refresh the local platform device support table. Do not assume an old local support table is still current after either command.
+9. Before the first control of any specific device, you must inspect that device's `supported_actions` via `device_search(...)`. This is required, not optional.
+10. Action names are device-specific by default. Do not assume generic names such as `set_power`, and do not assume a standard alias layer exists unless the runtime explicitly documents one.
+11. If runtime tools say a device is missing, go back to the CLI setup flow.
+12. If the user wants to add another device on an already connected platform, use:
    - `entroflow list-devices`
    - `entroflow setup ...`
 
@@ -140,6 +145,7 @@ Find devices:
 ```text
 device_search("lamp")
 device_search("all")
+device_search("mihome:709145591")
 ```
 
 Read status:
@@ -151,11 +157,15 @@ device_status("mihome:708678806")
 Control a device:
 
 ```text
-device_control("mihome:708678806", {"action": "turn_on", "args": {}})
+device_control("mihome:709145591", {"action": "turn_off", "args": {}})
 ```
 
-Do not assume generic action names such as `set_power`.
-Always inspect `supported_actions` from `device_search(...)` first and call the exact action names exposed by the installed device driver.
+Control rule:
+first inspect `supported_actions` from `device_search(...)`, then call the exact action name exposed by that device driver.
+
+Action naming policy:
+action names are device-specific by default, not guaranteed to be uniform across platforms or models.
+If a standard alias layer is ever introduced, only use it when the runtime explicitly documents that alias mapping.
 
 ## Failure Recovery
 
