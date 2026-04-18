@@ -75,6 +75,25 @@ def _open_browser(url: str) -> bool:
         return False
 
 
+def _is_interactive_stdin() -> bool:
+    stdin = getattr(sys, "stdin", None)
+    return bool(stdin and hasattr(stdin, "isatty") and stdin.isatty())
+
+
+def _should_wait_for_login_prompt(args: argparse.Namespace) -> bool:
+    if getattr(args, "no_prompt", False):
+        return False
+    return _is_interactive_stdin()
+
+
+def _refresh_platform_devices_table(platform: str) -> dict | None:
+    try:
+        return downloader.refresh_platform_devices_file(platform)
+    except Exception as exc:
+        _print(f"Platform device table refresh failed for {platform}: {exc}")
+        return None
+
+
 def _platforms_for_listing(explicit_platform: str | None) -> list[str]:
     if explicit_platform:
         return [_resolve_platform_or_exit(explicit_platform)]
@@ -207,10 +226,20 @@ def cmd_connect(args: argparse.Namespace) -> int:
     devices_file = connector_dir / f"{platform}_devices.json"
     if connector_dir.exists() and devices_file.exists():
         _print(f"Platform connector already installed: {platform}")
+        refreshed = _refresh_platform_devices_table(platform)
+        if refreshed:
+            _print(f"Refreshed device support table: {refreshed['count']} models -> {refreshed['path']}")
     else:
         version = downloader.download_platform(platform)
         config.set_platform_version(platform, version)
         _print(f"Installed platform connector {platform} (v{version})")
+        if devices_file.exists():
+            try:
+                payload = json.loads(devices_file.read_text(encoding="utf-8"))
+                if isinstance(payload, list):
+                    _print(f"Refreshed device support table: {len(payload)} models -> {devices_file}")
+            except (json.JSONDecodeError, OSError):
+                pass
 
     connector = loader.load_connector(platform)
     result = connector.start_qr_login(region="cn")
@@ -244,10 +273,17 @@ def cmd_connect(args: argparse.Namespace) -> int:
     if login_message:
         _print(login_message)
     _print("")
-    if login_type == "form":
-        input("Press Enter after you have submitted the connection form...")
+
+    if _should_wait_for_login_prompt(args):
+        if login_type == "form":
+            input("Press Enter after you have submitted the connection form...")
+        else:
+            input("Press Enter after you have scanned and confirmed the login...")
     else:
-        input("Press Enter after you have scanned and confirmed the login...")
+        if login_type == "form":
+            _print("Non-interactive mode detected; waiting for the connection form to be submitted...")
+        else:
+            _print("Non-interactive mode detected; waiting for login confirmation...")
 
     while True:
         poll = connector.poll_qr_login(session_id)
@@ -417,6 +453,15 @@ def cmd_update(_: argparse.Namespace) -> int:
     except Exception as exc:
         _print(f"Platform catalog refresh failed: {exc}")
 
+    local_platforms = _platforms_for_listing(None)
+    if local_platforms:
+        _print("")
+        _print("Platform device tables:")
+        for platform in local_platforms:
+            refreshed = _refresh_platform_devices_table(platform)
+            if refreshed:
+                _print(f"  {platform}: refreshed {refreshed['count']} models -> {refreshed['path']}")
+
     connected_platforms = config.get_connected_platforms()
     if connected_platforms:
         _print("")
@@ -445,6 +490,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     connect_parser = subparsers.add_parser("connect", help="Connect a platform and complete authentication")
     connect_parser.add_argument("platform", help="Platform id or alias, e.g. mihome")
+    connect_parser.add_argument("--no-prompt", action="store_true", help="Do not wait for a manual Enter prompt before polling login status")
     connect_parser.set_defaults(func=cmd_connect)
 
     list_parser = subparsers.add_parser("list-devices", help="List devices from connected platforms")

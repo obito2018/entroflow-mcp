@@ -55,7 +55,10 @@ Connect a platform:
 
 ```bash
 entroflow connect mihome
+entroflow connect mihome --no-prompt
 ```
+
+`entroflow connect <platform>` refreshes the local platform device support table every time it runs, even when the connector is already installed.
 
 List devices from connected platforms:
 
@@ -85,6 +88,8 @@ Update local assets and server code:
 ```bash
 entroflow update
 ```
+
+`entroflow update` refreshes platform guides and platform device support tables for locally installed connectors, even if the platform package version did not change.
 
 ## When To Use MCP
 
@@ -146,8 +151,11 @@ device_status("mihome:708678806")
 Control a device:
 
 ```text
-device_control("mihome:708678806", {"action": "set_power", "args": {"value": true}})
+device_control("mihome:708678806", {"action": "turn_on", "args": {}})
 ```
+
+Do not assume generic action names such as `set_power`.
+Always inspect `supported_actions` from `device_search(...)` first and call the exact action names exposed by the installed device driver.
 
 ## Failure Recovery
 

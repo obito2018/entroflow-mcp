@@ -28,6 +28,14 @@ def _download_and_extract(url: str, dest: Path):
         zf.extractall(dest)
 
 
+def _platform_connector_dir(platform: str) -> Path:
+    return ASSETS_DIR / platform / "connector"
+
+
+def _platform_devices_path(platform: str) -> Path:
+    return _platform_connector_dir(platform) / f"{platform}_devices.json"
+
+
 def get_platform_latest_version(platform: str) -> str:
     url = f"{API_BASE}/platforms/{platform}/latest"
     resp = httpx.get(url, params=_params(), timeout=10)
@@ -42,24 +50,39 @@ def get_device_latest_version(platform: str, model: str) -> str:
     return resp.json()["version"]
 
 
+def fetch_platform_devices_file(platform: str) -> list[dict]:
+    url = f"{API_BASE}/platforms/{platform}/{platform}_devices.json"
+    resp = httpx.get(url, params=_params(), timeout=30)
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, list):
+        raise ValueError(f"Platform device table for '{platform}' must be a list.")
+    return payload
+
+
+def refresh_platform_devices_file(platform: str) -> dict:
+    payload = fetch_platform_devices_file(platform)
+    connector_dir = _platform_connector_dir(platform)
+    connector_dir.mkdir(parents=True, exist_ok=True)
+    devices_path = _platform_devices_path(platform)
+    devices_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return {
+        "platform_id": platform,
+        "path": str(devices_path),
+        "count": len(payload),
+    }
+
+
 def download_platform(platform: str) -> str:
-    """下载平台包，解压到 assets/{platform}/connector/，同时下载 {platform}_devices.json，返回版本号。"""
+    """下载平台包，解压到 assets/{platform}/connector/，并刷新设备支持表。"""
     version = get_platform_latest_version(platform)
     url = f"{API_BASE}/platforms/{platform}/{version}"
-    dest = ASSETS_DIR / platform / "connector"
+    dest = _platform_connector_dir(platform)
     _download_and_extract(url, dest)
-
-    # 下载设备列表文件（独立于平台包）
-    devices_filename = f"{platform}_devices.json"
-    devices_url = f"{API_BASE}/platforms/{platform}/{devices_filename}"
-    try:
-        resp = httpx.get(devices_url, params=_params(), timeout=10)
-        if resp.status_code == 200:
-            devices_path = dest / devices_filename
-            devices_path.write_bytes(resp.content)
-    except Exception:
-        pass  # 非致命，设备列表文件不存在时忽略
-
+    refresh_platform_devices_file(platform)
     return version
 
 
