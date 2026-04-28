@@ -11,29 +11,31 @@ _login_threads: Dict[str, threading.Thread] = {}
 
 def _poll_login_background(platform: str, session_id: str):
     connector = loader.load_connector(platform)
-    for _ in range(100):  # 最多轮询约 5 分钟
+    for _ in range(100):  # up to about 5 minutes
         try:
             result = connector.poll_qr_login(session_id)
-        except Exception as e:
-            _login_results[session_id] = {"status": "error", "message": str(e)}
+        except Exception as exc:
+            _login_results[session_id] = {"status": "error", "message": str(exc)}
             return
         status = result.get("status", "")
         if status == "ok":
-            _login_results[session_id] = {"status": "ok", "message": "登录成功！"}
+            _login_results[session_id] = {"status": "ok", "message": "Login succeeded."}
             return
         if status == "expired":
-            _login_results[session_id] = {"status": "expired", "message": "二维码已过期。"}
+            _login_results[session_id] = {"status": "expired", "message": "Login QR code expired."}
             return
         time.sleep(3)
-    _login_results[session_id] = {"status": "timeout", "message": "轮询超时。"}
+    _login_results[session_id] = {"status": "timeout", "message": "Login polling timed out."}
 
 
-def login_start(platform: str) -> str:
-    """发起平台登录，返回登录方式和所需信息。后台立即开始轮询，用户操作期间保持连接。
-    返回 type=qrcode 时展示二维码，type=form 时引导用户填写表单。"""
+def login_start(platform: str, login_option: str = "local-page") -> str:
+    """Start platform login and return the login surface details."""
     try:
         connector = loader.load_connector(platform)
-        result = connector.start_qr_login(region="cn")
+        try:
+            result = connector.start_qr_login(region="cn", login_option=login_option)
+        except TypeError:
+            result = connector.start_qr_login(region="cn")
         session_id = result["session_id"]
         _login_results.pop(session_id, None)
         t = threading.Thread(
@@ -43,31 +45,50 @@ def login_start(platform: str) -> str:
         )
         _login_threads[session_id] = t
         t.start()
-        return (
-            f"type=qrcode\n"
-            f"qr_url={result['qr_url']}\n"
-            f"session_id={session_id}\n"
-            f"expires_in={result['expires_in']}\n"
-            f"message=请在浏览器中打开 qr_url，用米家 App 扫描二维码。\n"
-            f"next=扫码后调用 login_poll(platform='{platform}', session_id='{session_id}')"
+
+        lines = [
+            "type=qrcode",
+            f"qr_url={result['qr_url']}",
+            f"login_option={result.get('login_option', login_option)}",
+        ]
+        qr_file_path = str(result.get("qr_file_path") or "").strip()
+        if qr_file_path:
+            lines.append(f"qr_file_path={qr_file_path}")
+        lines.extend(
+            [
+                f"session_id={session_id}",
+                f"expires_in={result['expires_in']}",
+                f"message={result.get('message', 'Open qr_url and complete login in the Mi Home app.')}",
+                f"next=After scanning, call login_poll(platform='{platform}', session_id='{session_id}')",
+            ]
         )
-    except Exception as e:
-        return f"登录启动失败: {e}"
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"Login start failed: {exc}"
 
 
 def login_poll(platform: str, session_id: str) -> str:
-    """检查后台登录状态。返回 ok / waiting / expired / error。"""
+    """Check background login state. Returns ok / waiting / expired / error."""
     if not session_id:
-        return "缺少 session_id，请传入 login_start 返回的 session_id。"
+        return "Missing session_id. Pass the session_id returned by login_start()."
     for _ in range(20):
         if session_id in _login_results:
             result = _login_results.pop(session_id)
             _login_threads.pop(session_id, None)
             status = result["status"]
             if status == "ok":
-                return f"status=ok\nmessage=登录成功！现在可以调用 device_discover(platform='{platform}') 发现设备。"
+                return (
+                    "status=ok\n"
+                    f"message=Login succeeded. You can now continue device discovery for platform '{platform}'."
+                )
             if status == "expired":
-                return f"status=expired\nmessage=二维码已过期，请重新调用 login_start(platform='{platform}')。"
+                return (
+                    "status=expired\n"
+                    f"message=Login QR code expired. Run login_start(platform='{platform}') again."
+                )
             return f"status={status}\nmessage={result['message']}"
         time.sleep(3)
-    return f"status=waiting\nmessage=用户尚未完成扫码，请稍后再次调用 login_poll(platform='{platform}', session_id='{session_id}')"
+    return (
+        "status=waiting\n"
+        f"message=User has not completed login yet. Call login_poll(platform='{platform}', session_id='{session_id}') again later."
+    )

@@ -86,6 +86,22 @@ def _should_wait_for_login_prompt(args: argparse.Namespace) -> bool:
     return _is_interactive_stdin()
 
 
+def _start_platform_login(connector, args: argparse.Namespace) -> dict:
+    login_option = str(getattr(args, "login_option", "local-page") or "local-page").strip().lower()
+    if login_option not in {"local-page", "qr-file"}:
+        raise RuntimeError(f"Unsupported login option: {login_option}")
+
+    try:
+        return connector.start_qr_login(region="cn", login_option=login_option)
+    except TypeError:
+        # Backward compatibility for already published connectors that do not yet
+        # accept the new login_option argument.
+        result = connector.start_qr_login(region="cn")
+        result = dict(result)
+        result.setdefault("login_option", "local-page")
+        return result
+
+
 def _refresh_platform_devices_table(platform: str) -> dict | None:
     try:
         return downloader.refresh_platform_devices_file(platform)
@@ -242,29 +258,44 @@ def cmd_connect(args: argparse.Namespace) -> int:
                 pass
 
     connector = loader.load_connector(platform)
-    result = connector.start_qr_login(region="cn")
+    result = _start_platform_login(connector, args)
     session_id = result.get("session_id")
     qr_url = result.get("qr_url")
     expires_in = result.get("expires_in")
     login_type = str(result.get("type") or "qrcode").strip().lower()
     login_message = str(result.get("message") or "").strip()
+    login_option = str(result.get("login_option") or getattr(args, "login_option", "local-page")).strip().lower()
+    qr_file_path = str(result.get("qr_file_path") or "").strip()
 
     if not session_id or not qr_url:
         raise RuntimeError(f"Unsupported login response for platform '{platform}': {result}")
 
     _print("")
-    opened = _open_browser(qr_url)
-    if login_type == "form":
+    opened = False
+    if login_option != "qr-file":
+        opened = _open_browser(qr_url)
+
+    if login_option == "qr-file":
+        _print("Login QR code was generated as a local file.")
+        if qr_file_path:
+            _print("Send this file to the user through chat or open it on another device for scanning:")
+            _print(qr_file_path)
+        else:
+            _print("QR file path was not returned by the connector. Use the login URL below instead:")
+        _print("If needed, you can still use the local login page:")
+        _print(qr_url)
+    elif login_type == "form":
         if opened:
             _print("A browser window was opened for login. Complete the local connection form there.")
         else:
             _print("Could not open the browser automatically. Open the following URL and complete the local connection form:")
+        _print(qr_url)
     else:
         if opened:
             _print("A browser window was opened for login. Complete confirmation in the platform app.")
         else:
             _print("Could not open the browser automatically. Open the following URL and complete login in the platform app:")
-    _print(qr_url)
+        _print(qr_url)
     if expires_in:
         if login_type == "form":
             _print(f"Connection form expires in {expires_in} seconds.")
@@ -491,6 +522,12 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser = subparsers.add_parser("connect", help="Connect a platform and complete authentication")
     connect_parser.add_argument("platform", help="Platform id or alias, e.g. mihome")
     connect_parser.add_argument("--no-prompt", action="store_true", help="Do not wait for a manual Enter prompt before polling login status")
+    connect_parser.add_argument(
+        "--login-option",
+        choices=("local-page", "qr-file"),
+        default="local-page",
+        help="Choose how the login QR is presented. Use 'qr-file' for chat-based or headless login flows.",
+    )
     connect_parser.set_defaults(func=cmd_connect)
 
     list_parser = subparsers.add_parser("list-devices", help="List devices from connected platforms")

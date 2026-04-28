@@ -56,9 +56,11 @@ Connect a platform:
 ```bash
 entroflow connect mihome
 entroflow connect mihome --no-prompt
+entroflow connect mihome --login-option qr-file
 ```
 
 `entroflow connect <platform>` refreshes the local platform device support table every time it runs, even when the connector is already installed.
+For Mi Home, use `--login-option qr-file` when the agent is running remotely, inside chat, or in a headless environment. That mode generates a local QR image file the user can scan remotely.
 
 List devices from connected platforms:
 

@@ -24,18 +24,28 @@ class NonInteractiveStdin:
 
 
 class FakeConnector:
-    def __init__(self, poll_results: list[dict], devices: list[dict] | None = None):
+    def __init__(
+        self,
+        poll_results: list[dict],
+        devices: list[dict] | None = None,
+        qr_file_path: str | None = None,
+    ):
         self._poll_results = list(poll_results)
         self._devices = devices or []
+        self._qr_file_path = qr_file_path
         self.poll_calls = 0
 
-    def start_qr_login(self, region: str = "cn") -> dict:
-        return {
+    def start_qr_login(self, region: str = "cn", login_option: str = "local-page") -> dict:
+        payload = {
             "session_id": "session-1",
             "qr_url": "https://example.com/login",
             "expires_in": 120,
             "type": "qrcode",
+            "login_option": login_option,
         }
+        if login_option == "qr-file" and self._qr_file_path:
+            payload["qr_file_path"] = self._qr_file_path
+        return payload
 
     def poll_qr_login(self, session_id: str) -> dict:
         result = self._poll_results[min(self.poll_calls, len(self._poll_results) - 1)]
@@ -117,11 +127,90 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(sys, "stdin", NonInteractiveStdin()),
             patch.object(time, "sleep", return_value=None),
         ):
-            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False))
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
 
         self.assertEqual(rc, 0)
         self.assertEqual(connector.poll_calls, 2)
         self.assertIn("Non-interactive mode detected; waiting for login confirmation...", printed)
+
+    def test_connect_mihome_qr_file_mode_prints_local_file_and_skips_browser(self):
+        self._write_platform_devices("mihome", ["old.model"])
+        qr_file = str(self.runtime_dir / "mihome-login-session-1.png")
+        connector = FakeConnector(
+            poll_results=[
+                {"status": "waiting", "message": "Waiting for confirmation..."},
+                {"status": "ok"},
+            ],
+            qr_file_path=qr_file,
+        )
+        printed: list[str] = []
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(downloader, "download_platform_guide", return_value=None),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "mihome",
+                "path": str(self._devices_file("mihome")),
+                "count": 12263,
+            }),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_open_browser", side_effect=AssertionError("_open_browser() should not be called")),
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+            patch.object(sys, "stdin", NonInteractiveStdin()),
+            patch.object(time, "sleep", return_value=None),
+        ):
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="qr-file"))
+
+        self.assertEqual(rc, 0)
+        joined = "\n".join(printed)
+        self.assertIn("Login QR code was generated as a local file.", joined)
+        self.assertIn(qr_file, joined)
+        self.assertIn("https://example.com/login", joined)
+
+    def test_connect_falls_back_for_legacy_connector_without_login_option_argument(self):
+        self._write_platform_devices("mihome", ["old.model"])
+        printed: list[str] = []
+
+        class LegacyConnector:
+            def __init__(self):
+                self.poll_calls = 0
+
+            def start_qr_login(self, region: str = "cn") -> dict:
+                return {
+                    "session_id": "legacy-session",
+                    "qr_url": "https://example.com/legacy-login",
+                    "expires_in": 120,
+                    "type": "qrcode",
+                }
+
+            def poll_qr_login(self, session_id: str) -> dict:
+                self.poll_calls += 1
+                return {"status": "ok"}
+
+        connector = LegacyConnector()
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(downloader, "download_platform_guide", return_value=None),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "mihome",
+                "path": str(self._devices_file("mihome")),
+                "count": 12263,
+            }),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_open_browser", return_value=False),
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+            patch.object(sys, "stdin", NonInteractiveStdin()),
+        ):
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(connector.poll_calls, 1)
+        self.assertIn("https://example.com/legacy-login", "\n".join(printed))
 
     def test_update_refreshes_platform_device_table_even_without_platform_version_change(self):
         config.set_platform_version("mihome", "1.0.3")
