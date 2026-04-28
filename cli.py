@@ -8,7 +8,7 @@ from pathlib import Path
 
 from core import config, downloader, loader, store
 from tools.platform import resolve_platform
-from tools.system import check_updates, update_server
+from tools.system import check_updates, managed_iot_platforms, update_server
 
 
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
@@ -110,11 +110,59 @@ def _refresh_platform_devices_table(platform: str) -> dict | None:
         return None
 
 
+def _catalog_platform_ids() -> set[str]:
+    return {
+        str(entry.get("id")).strip()
+        for entry in _load_catalog()
+        if isinstance(entry, dict) and str(entry.get("id", "")).strip()
+    }
+
+
+def _migrate_state():
+    config.ensure_state_migrated(_catalog_platform_ids() or None)
+
+
+def _ensure_platform_connector_ready(platform: str) -> dict:
+    connector_dir = ASSETS_DIR / platform / "connector"
+    client_path = connector_dir / "client.py"
+    devices_file = connector_dir / f"{platform}_devices.json"
+    local_ver = config.read_local_connector_version(platform)
+    remote_ver = downloader.get_platform_latest_version(platform)
+
+    should_install = (
+        not client_path.exists()
+        or not devices_file.exists()
+        or not local_ver
+        or local_ver != remote_ver
+    )
+
+    if should_install:
+        previous = local_ver or "missing"
+        new_ver = downloader.download_platform(platform)
+        config.set_platform_version(platform, new_ver)
+        config.add_connected_iot_platform(platform)
+        return {
+            "status": "installed" if previous == "missing" else "updated",
+            "previous_version": previous,
+            "version": new_ver,
+            "path": str(client_path),
+        }
+
+    config.add_connected_iot_platform(platform)
+    return {
+        "status": "ready",
+        "previous_version": local_ver,
+        "version": local_ver,
+        "path": str(client_path),
+    }
+
+
 def _platforms_for_listing(explicit_platform: str | None) -> list[str]:
     if explicit_platform:
         return [_resolve_platform_or_exit(explicit_platform)]
 
-    platforms = config.get_connected_platforms()
+    _migrate_state()
+    platforms = config.get_connected_iot_platforms()
     if platforms:
         return platforms
 
@@ -134,6 +182,7 @@ def _connector_list_devices(connector):
 
 def cmd_list_platforms(args: argparse.Namespace) -> int:
     _refresh_catalog()
+    _migrate_state()
     catalog = _load_catalog()
     if not catalog:
         _print("No platform catalog is available locally. Run `entroflow update` and try again.")
@@ -218,6 +267,7 @@ def cmd_list_platforms(args: argparse.Namespace) -> int:
 
 def cmd_connect(args: argparse.Namespace) -> int:
     _refresh_catalog()
+    _migrate_state()
     platform = _resolve_platform_or_exit(args.platform)
 
     _print(f"Connecting platform: {platform}")
@@ -238,24 +288,22 @@ def cmd_connect(args: argparse.Namespace) -> int:
     except Exception as exc:
         _print(f"Platform guide sync skipped: {exc}")
 
-    connector_dir = ASSETS_DIR / platform / "connector"
-    devices_file = connector_dir / f"{platform}_devices.json"
-    if connector_dir.exists() and devices_file.exists():
-        _print(f"Platform connector already installed: {platform}")
-        refreshed = _refresh_platform_devices_table(platform)
-        if refreshed:
-            _print(f"Refreshed device support table: {refreshed['count']} models -> {refreshed['path']}")
-    else:
-        version = downloader.download_platform(platform)
-        config.set_platform_version(platform, version)
+    connector_result = _ensure_platform_connector_ready(platform)
+    status = connector_result["status"]
+    version = connector_result["version"]
+    if status == "installed":
         _print(f"Installed platform connector {platform} (v{version})")
-        if devices_file.exists():
-            try:
-                payload = json.loads(devices_file.read_text(encoding="utf-8"))
-                if isinstance(payload, list):
-                    _print(f"Refreshed device support table: {len(payload)} models -> {devices_file}")
-            except (json.JSONDecodeError, OSError):
-                pass
+    elif status == "updated":
+        _print(
+            f"Updated platform connector {platform} "
+            f"({connector_result['previous_version']} -> v{version})"
+        )
+    else:
+        _print(f"Platform connector already installed and up to date: {platform} (v{version})")
+
+    refreshed = _refresh_platform_devices_table(platform)
+    if refreshed:
+        _print(f"Refreshed device support table: {refreshed['count']} models -> {refreshed['path']}")
 
     connector = loader.load_connector(platform)
     result = _start_platform_login(connector, args)
@@ -320,7 +368,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
         poll = connector.poll_qr_login(session_id)
         status = poll.get("status", "")
         if status == "ok":
-            config.add_installed_platform(platform)
+            config.add_connected_iot_platform(platform)
             _print(f"Platform '{platform}' connected successfully.")
             return 0
         if status == "waiting":
@@ -336,6 +384,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
 
 def cmd_list_devices(args: argparse.Namespace) -> int:
     _refresh_catalog()
+    _migrate_state()
     platforms = _platforms_for_listing(args.platform)
     if not platforms:
         _print("No connected platforms found. Run `entroflow connect <platform>` first.")
@@ -474,17 +523,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_update(_: argparse.Namespace) -> int:
+    _refresh_catalog()
+    _migrate_state()
     _print(check_updates())
     _print("")
     _print(update_server())
     _print("")
     try:
-        downloader.refresh_catalog()
         _print("Platform catalog refreshed.")
     except Exception as exc:
         _print(f"Platform catalog refresh failed: {exc}")
 
-    local_platforms = _platforms_for_listing(None)
+    local_platforms = managed_iot_platforms()
     if local_platforms:
         _print("")
         _print("Platform device tables:")
@@ -493,7 +543,7 @@ def cmd_update(_: argparse.Namespace) -> int:
             if refreshed:
                 _print(f"  {platform}: refreshed {refreshed['count']} models -> {refreshed['path']}")
 
-    connected_platforms = config.get_connected_platforms()
+    connected_platforms = config.get_connected_iot_platforms()
     if connected_platforms:
         _print("")
         _print("Platform guides:")

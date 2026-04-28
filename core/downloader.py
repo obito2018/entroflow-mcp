@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from core.config import get_install_id
+from core.config import get_install_id, write_connector_manifest
 
 API_BASE = os.environ.get("ENTROFLOW_API_BASE", "https://api.entroflow.ai/api")
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
@@ -83,6 +83,7 @@ def download_platform(platform: str) -> str:
     dest = _platform_connector_dir(platform)
     _download_and_extract(url, dest)
     refresh_platform_devices_file(platform)
+    write_connector_manifest(platform, version, source="download")
     return version
 
 

@@ -71,6 +71,7 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(cli, "ASSETS_DIR", self.assets_dir),
             patch.object(cli, "PLATFORM_DOCS_DIR", self.docs_dir),
             patch.object(config, "CONFIG_PATH", self.config_path),
+            patch.object(config, "ASSETS_DIR", self.assets_dir),
             patch.object(downloader, "ASSETS_DIR", self.assets_dir),
             patch.object(downloader, "CATALOG_PATH", self.assets_dir / "catalog.json"),
             patch.object(downloader, "PLATFORM_DOCS_DIR", self.docs_dir),
@@ -84,6 +85,11 @@ class MihomeCliFlowTests(unittest.TestCase):
 
         loader._module_cache.clear()
         self.addCleanup(loader._module_cache.clear)
+
+    def _write_connector_client(self, platform: str, body: str = "VALUE = 1\n") -> Path:
+        client_path = self._connector_dir(platform) / "client.py"
+        client_path.write_text(body, encoding="utf-8")
+        return client_path
 
     def _connector_dir(self, platform: str) -> Path:
         path = self.assets_dir / platform / "connector"
@@ -214,7 +220,7 @@ class MihomeCliFlowTests(unittest.TestCase):
 
     def test_update_refreshes_platform_device_table_even_without_platform_version_change(self):
         config.set_platform_version("mihome", "1.0.3")
-        config.add_installed_platform("mihome")
+        config.add_connected_iot_platform("mihome")
         devices_path = self._write_platform_devices("mihome", [f"legacy.model.{idx}" for idx in range(303)])
         latest_payload = [{"model": f"mihome.model.{idx}"} for idx in range(12263)]
         printed: list[str] = []
@@ -289,6 +295,106 @@ class MihomeCliFlowTests(unittest.TestCase):
 
         update_text.encode("ascii")
         server_text.encode("ascii")
+
+    def test_update_ignores_agent_platform_entries(self):
+        config.set_installed_platforms(["Codex", "OpenClaw"])
+        config.add_connected_iot_platform("mihome")
+        config.set_platform_version("mihome", "1.0.4")
+        self._write_connector_client("mihome")
+        self._write_platform_devices("mihome", ["mihome.model.1"])
+
+        refresh_calls: list[str] = []
+
+        with (
+            patch.object(cli, "_print"),
+            patch.object(cli, "update_server", return_value="MCP Server is already up to date (1.0.4)."),
+            patch.object(downloader, "refresh_catalog", return_value={}),
+            patch.object(downloader, "get_platform_latest_version", return_value="1.0.4"),
+            patch.object(downloader, "refresh_platform_devices_file", side_effect=lambda platform: refresh_calls.append(platform) or {
+                "platform_id": platform,
+                "path": str(self._devices_file(platform)),
+                "count": 1,
+            }),
+            patch.object(downloader, "refresh_platform_guides", return_value=[]),
+        ):
+            rc = cli.cmd_update(argparse.Namespace())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(refresh_calls, ["mihome"])
+
+    def test_update_repairs_platform_when_version_metadata_is_missing(self):
+        config.set_installed_platforms(["Codex"])
+        config.add_connected_iot_platform("mihome")
+        self._write_connector_client("mihome")
+        self._write_platform_devices("mihome", ["legacy.model"])
+        printed: list[str] = []
+
+        def download_platform_side_effect(platform: str) -> str:
+            self.assertEqual(platform, "mihome")
+            self._write_connector_client("mihome", "VALUE = 2\n")
+            self._write_platform_devices("mihome", ["mihome.model.0"])
+            return "1.0.4"
+
+        with (
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch.object(cli, "update_server", return_value="MCP Server is already up to date (1.0.4)."),
+            patch.object(downloader, "refresh_catalog", return_value={}),
+            patch.object(downloader, "get_platform_latest_version", return_value="1.0.4"),
+            patch.object(downloader, "download_platform", side_effect=download_platform_side_effect),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "mihome",
+                "path": str(self._devices_file("mihome")),
+                "count": 1,
+            }),
+            patch.object(downloader, "refresh_platform_guides", return_value=[]),
+        ):
+            rc = cli.cmd_update(argparse.Namespace())
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(config.get_platform_version("mihome"), "1.0.4")
+        joined = "\n".join(printed)
+        self.assertIn("missing version metadata", joined)
+
+    def test_connect_updates_platform_connector_when_local_version_is_stale(self):
+        config.set_platform_version("mihome", "1.0.3")
+        config.add_connected_iot_platform("mihome")
+        self._write_connector_client("mihome", "VALUE = 1\n")
+        self._write_platform_devices("mihome", ["legacy.model"])
+        connector = FakeConnector(
+            poll_results=[
+                {"status": "ok"},
+            ]
+        )
+        printed: list[str] = []
+
+        def download_platform_side_effect(platform: str) -> str:
+            self.assertEqual(platform, "mihome")
+            self._write_connector_client("mihome", "VALUE = 2\n")
+            self._write_platform_devices("mihome", ["mihome.model.0"])
+            return "1.0.4"
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(downloader, "download_platform_guide", return_value=None),
+            patch.object(downloader, "get_platform_latest_version", return_value="1.0.4"),
+            patch.object(downloader, "download_platform", side_effect=download_platform_side_effect),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "mihome",
+                "path": str(self._devices_file("mihome")),
+                "count": 1,
+            }),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_open_browser", return_value=False),
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+            patch.object(sys, "stdin", NonInteractiveStdin()),
+        ):
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(config.get_platform_version("mihome"), "1.0.4")
+        self.assertIn("Updated platform connector mihome (1.0.3 -> v1.0.4)", "\n".join(printed))
 
 
 if __name__ == "__main__":
