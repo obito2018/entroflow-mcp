@@ -1,0 +1,102 @@
+{
+  "platforms": [
+    {
+      "id": "homeassistant",
+      "display_name": "Home Assistant",
+      "aliases": [
+        "homeassistant",
+        "Home Assistant",
+        "HA",
+        "HASS"
+      ]
+    },
+    {
+      "id": "mihome",
+      "display_name": "Xiaomi IoT",
+      "aliases": [
+        "mihome",
+        "Xiaomi IoT",
+        "米家",
+        "小米之家",
+        "mijia",
+        "小米",
+        "xiaomi"
+      ],
+      "display_name_zh": "米家"
+    },
+    {
+      "id": "tuya",
+      "display_name": "Tuya Smart",
+      "aliases": [
+        "tuya",
+        "Tuya Smart",
+        "涂鸦智能"
+      ],
+      "display_name_zh": "涂鸦智能"
+    },
+    {
+      "id": "matter",
+      "display_name": "matter",
+      "aliases": [
+        "matter"
+      ]
+    },
+    {
+      "id": "seeedstudio",
+      "display_name": "Seeed Studio",
+      "aliases": [
+        "seeedstudio",
+        "Seeed Studio"
+      ]
+    },
+    {
+      "id": "unitree",
+      "display_name": "Unitree",
+      "aliases": [
+        "unitree",
+        "Unitree",
+        "宇树科技"
+      ],
+      "display_name_zh": "宇树科技"
+    },
+    {
+      "id": "AGIBOT",
+      "display_name": "AGIBOT",
+      "aliases": [
+        "AGIBOT",
+        "智元机器人",
+        "智元"
+      ],
+      "display_name_zh": "智元机器人"
+    },
+    {
+      "id": "EngineAI",
+      "display_name": "EngineAI",
+      "aliases": [
+        "EngineAI",
+        "众擎机器人",
+        "众擎",
+        "Engine"
+      ],
+      "display_name_zh": "众擎机器人"
+    },
+    {
+      "id": "xlerobot",
+      "display_name": "XLeRobot",
+      "aliases": [
+        "xlerobot",
+        "XLeRobot"
+      ]
+    },
+    {
+      "id": "fourier",
+      "display_name": "Fourier",
+      "aliases": [
+        "fourier",
+        "Fourier",
+        "傅利叶机器人"
+      ],
+      "display_name_zh": "傅利叶机器人"
+    }
+  ]
+}

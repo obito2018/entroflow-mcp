@@ -66,10 +66,28 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.docs_dir = self.home / "docs" / "platforms"
         self.runtime_dir = self.home / "runtime"
         self.config_path = self.home / "config.json"
+        self.bundled_catalog_path = Path(self.temp_dir.name) / "bundled_catalog.json"
+        self.bundled_catalog_path.write_text(
+            json.dumps(
+                {
+                    "platforms": [
+                        {
+                            "id": "mihome",
+                            "display_name": "Xiaomi IoT",
+                            "aliases": ["mihome", "xiaomi"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
         self.patches = [
             patch.object(cli, "ASSETS_DIR", self.assets_dir),
             patch.object(cli, "PLATFORM_DOCS_DIR", self.docs_dir),
+            patch.object(cli, "BUNDLED_CATALOG_PATH", self.bundled_catalog_path),
             patch.object(config, "CONFIG_PATH", self.config_path),
             patch.object(config, "ASSETS_DIR", self.assets_dir),
             patch.object(downloader, "ASSETS_DIR", self.assets_dir),
@@ -395,6 +413,80 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(config.get_platform_version("mihome"), "1.0.4")
         self.assertIn("Updated platform connector mihome (1.0.3 -> v1.0.4)", "\n".join(printed))
+
+    def test_list_platforms_uses_bundled_catalog_when_local_catalog_is_missing(self):
+        printed: list[str] = []
+
+        with (
+            patch.object(downloader, "refresh_catalog", side_effect=RuntimeError("offline")),
+            patch.object(cli, "_print", side_effect=printed.append),
+        ):
+            rc = cli.cmd_list_platforms(argparse.Namespace(query=None))
+
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.assets_dir / "catalog.json").exists())
+        joined = "\n".join(printed)
+        self.assertIn("Using the local cached catalog instead.", joined)
+        self.assertIn("Found 1 supported platform(s):", joined)
+        self.assertIn("- mihome (Xiaomi IoT)", joined)
+
+    def test_list_platforms_reports_catalog_refresh_failure_and_uses_cached_catalog(self):
+        (self.assets_dir).mkdir(parents=True, exist_ok=True)
+        (self.assets_dir / "catalog.json").write_text(
+            json.dumps(
+                {
+                    "platforms": [
+                        {
+                            "id": "mihome",
+                            "display_name": "Xiaomi IoT",
+                            "aliases": ["mihome"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        printed: list[str] = []
+
+        with (
+            patch.object(downloader, "refresh_catalog", side_effect=RuntimeError("catalog endpoint down")),
+            patch.object(cli, "_print", side_effect=printed.append),
+        ):
+            rc = cli.cmd_list_platforms(argparse.Namespace(query=None))
+
+        self.assertEqual(rc, 0)
+        joined = "\n".join(printed)
+        self.assertIn("Platform catalog refresh failed: catalog endpoint down", joined)
+        self.assertIn("Using the local cached catalog instead.", joined)
+
+    def test_update_reports_catalog_refresh_failure_instead_of_success(self):
+        config.add_connected_iot_platform("mihome")
+        config.set_platform_version("mihome", "1.0.4")
+        self._write_connector_client("mihome")
+        self._write_platform_devices("mihome", ["mihome.model.1"])
+        printed: list[str] = []
+
+        with (
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch.object(downloader, "refresh_catalog", side_effect=RuntimeError("catalog endpoint down")),
+            patch.object(cli, "check_updates", return_value="Checking updates:\n\nAll packages are up to date."),
+            patch.object(cli, "update_server", return_value="MCP Server is already up to date (1.0.2)."),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "mihome",
+                "path": str(self._devices_file("mihome")),
+                "count": 1,
+            }),
+            patch.object(downloader, "refresh_platform_guides", return_value=[]),
+        ):
+            rc = cli.cmd_update(argparse.Namespace())
+
+        self.assertEqual(rc, 0)
+        joined = "\n".join(printed)
+        self.assertIn("Platform catalog refresh failed: catalog endpoint down", joined)
+        self.assertIn("Continuing with the local cached catalog.", joined)
+        self.assertNotIn("Platform catalog refreshed.", joined)
 
 
 if __name__ == "__main__":

@@ -111,7 +111,12 @@ def refresh_catalog() -> dict:
         json.dumps(catalog, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    return catalog
+    return {
+        "status": "synced",
+        "path": str(CATALOG_PATH),
+        "count": len(catalog.get("platforms", [])) if isinstance(catalog, dict) else 0,
+        "catalog": catalog,
+    }
 
 
 def _guide_manifest_path(platform: str) -> Path:

@@ -54,13 +54,11 @@ If the guide is still missing after `entroflow connect` or `entroflow update`, t
 Connect a platform:
 
 ```bash
-entroflow connect mihome
-entroflow connect mihome --no-prompt
-entroflow connect mihome --login-option qr-file
+entroflow connect <platform>
 ```
 
-`entroflow connect <platform>` refreshes the local platform device support table every time it runs, even when the connector is already installed.
-For Mi Home, use `--login-option qr-file` when the agent is running remotely, inside chat, or in a headless environment. That mode generates a local QR image file the user can scan remotely.
+Before running `entroflow connect <platform>`, read `~/.entroflow/docs/platforms/<platform>.md` first.
+Each platform has its own login method. Follow the platform guide instead of guessing the login flow from the skill file.
 
 List devices from connected platforms:
 
@@ -109,8 +107,8 @@ For a brand new user or a new platform, always follow this order:
 
 1. Run `entroflow list-platforms [query]`.
 2. Identify the exact platform id.
-3. Run `entroflow connect <platform>`.
-4. Read `~/.entroflow/docs/platforms/<platform>.md` if it was synced locally.
+3. Read `~/.entroflow/docs/platforms/<platform>.md` if it was synced locally.
+4. Run `entroflow connect <platform>`.
 5. If the guide is not available after connect, tell the user the platform-specific guide has not been published yet.
 6. Run `entroflow list-devices`.
 7. Ask the user which exact device should be set up.
@@ -127,15 +125,16 @@ For a brand new user or a new platform, always follow this order:
 1. Do not use MCP for installation, login, discovery, or updates.
 2. Do not invent `name`, `location`, or `remark`. Ask the user.
 3. Do not assume a platform id. Always confirm it with `entroflow list-platforms`.
-4. `entroflow connect <platform>` will sync the latest published platform guide automatically when one exists.
-5. If the guide is still missing after `connect` or `update`, tell the user the platform guide is not published yet and ask whether they want to continue without it.
-6. If the user only needs the resource package, use `entroflow download`.
-7. If the user wants the device to become callable through MCP, use `entroflow setup`.
-8. `entroflow connect <platform>` and `entroflow update` both refresh the local platform device support table.
-9. Before the first control of any specific device, you must inspect `supported_actions` via `device_search(...)`.
-10. Action names are device-specific by default. Do not assume generic names such as `set_power`.
-11. If runtime tools say a device is missing, go back to the CLI setup flow.
-12. If the user wants to add another device on an already connected platform, use:
+4. Before `entroflow connect <platform>`, read `~/.entroflow/docs/platforms/<platform>.md`.
+5. `entroflow connect <platform>` will sync the latest published platform guide automatically when one exists.
+6. If the guide is still missing after `connect` or `update`, tell the user the platform guide is not published yet and ask whether they want to continue without it.
+7. If the user only needs the resource package, use `entroflow download`.
+8. If the user wants the device to become callable through MCP, use `entroflow setup`.
+9. `entroflow connect <platform>` and `entroflow update` both refresh the local platform device support table.
+10. Before the first control of any specific device, you must inspect `supported_actions` via `device_search(...)`.
+11. Action names are device-specific by default. Do not assume generic names such as `set_power`.
+12. If runtime tools say a device is missing, go back to the CLI setup flow.
+13. If the user wants to add another device on an already connected platform, use:
    - `entroflow list-devices`
    - `entroflow setup ...`
 

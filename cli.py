@@ -13,18 +13,29 @@ from tools.system import check_updates, managed_iot_platforms, update_server
 
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 PLATFORM_DOCS_DIR = Path.home() / ".entroflow" / "docs" / "platforms"
+BUNDLED_CATALOG_PATH = Path(__file__).resolve().parent / "assets" / "catalog.json"
 
 
 def _print(message: str = ""):
     print(message)
 
 
-def _refresh_catalog():
+def _refresh_catalog() -> dict:
     try:
-        downloader.refresh_catalog()
-    except Exception:
-        # Catalog refresh is helpful for aliases, but not required for local execution.
-        pass
+        return downloader.refresh_catalog()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": str(exc),
+        }
+
+
+def _ensure_bundled_catalog_seeded():
+    catalog_path = ASSETS_DIR / "catalog.json"
+    if catalog_path.exists() or not BUNDLED_CATALOG_PATH.exists():
+        return
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(BUNDLED_CATALOG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _resolve_platform_or_exit(name: str) -> str:
@@ -36,6 +47,8 @@ def _resolve_platform_or_exit(name: str) -> str:
 
 def _load_catalog() -> list[dict]:
     catalog_path = ASSETS_DIR / "catalog.json"
+    if not catalog_path.exists():
+        _ensure_bundled_catalog_seeded()
     if not catalog_path.exists():
         return []
 
@@ -181,12 +194,17 @@ def _connector_list_devices(connector):
 
 
 def cmd_list_platforms(args: argparse.Namespace) -> int:
-    _refresh_catalog()
+    refresh_result = _refresh_catalog()
     _migrate_state()
     catalog = _load_catalog()
     if not catalog:
         _print("No platform catalog is available locally. Run `entroflow update` and try again.")
         return 1
+
+    if refresh_result.get("status") == "error":
+        _print(f"Platform catalog refresh failed: {refresh_result['error']}")
+        _print("Using the local cached catalog instead.")
+        _print("")
 
     query = (args.query or "").strip().lower()
     matched = []
@@ -523,16 +541,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_update(_: argparse.Namespace) -> int:
-    _refresh_catalog()
+    refresh_result = _refresh_catalog()
     _migrate_state()
     _print(check_updates())
     _print("")
     _print(update_server())
     _print("")
-    try:
-        _print("Platform catalog refreshed.")
-    except Exception as exc:
-        _print(f"Platform catalog refresh failed: {exc}")
+    if refresh_result.get("status") == "synced":
+        _print(f"Platform catalog refreshed ({refresh_result.get('count', 0)} platforms).")
+    else:
+        _print(f"Platform catalog refresh failed: {refresh_result.get('error', 'unknown error')}")
+        if _load_catalog():
+            _print("Continuing with the local cached catalog.")
 
     local_platforms = managed_iot_platforms()
     if local_platforms:
