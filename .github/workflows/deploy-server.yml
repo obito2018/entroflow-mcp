@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'server.py'
+      - 'cli.py'
       - 'skill.md'
       - 'requirements.txt'
       - 'assets/**'
@@ -30,6 +31,7 @@ jobs:
           mkdir -p dist
           zip -r dist/v${{ steps.version.outputs.version }}.zip \
             server.py \
+            cli.py \
             skill.md \
             requirements.txt \
             assets \
