@@ -8,6 +8,7 @@ on:
       - 'server.py'
       - 'skill.md'
       - 'requirements.txt'
+      - 'assets/**'
       - 'core/**'
       - 'tools/**'
       - '.github/workflows/deploy-server.yml'
@@ -29,6 +30,7 @@ jobs:
             server.py \
             skill.md \
             requirements.txt \
+            assets \
             core \
             tools \
             --exclude "**/__pycache__/*" \
