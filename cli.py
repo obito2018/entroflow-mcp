@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import argparse
 import getpass
 import json
@@ -205,8 +205,8 @@ def _print_required_inputs(required_inputs: list) -> None:
             _print(f"  - {name}{secret}")
 
 
-def _prompt_required_inputs(required_inputs: list, inputs: dict) -> bool:
-    if not required_inputs or not _is_interactive_stdin():
+def _prompt_required_inputs(required_inputs: list, inputs: dict, args: argparse.Namespace) -> bool:
+    if not required_inputs or not _should_wait_for_login_prompt(args):
         return False
     changed = False
     for item in required_inputs:
@@ -475,7 +475,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
             required_inputs = result.get("required_inputs") or []
             if isinstance(required_inputs, list):
                 _print_required_inputs(required_inputs)
-                if _prompt_required_inputs(required_inputs, inputs):
+                if _prompt_required_inputs(required_inputs, inputs, args):
                     continue
             _print("Provide the required values with `--input key=value` or a platform-specific documented shortcut such as `--url` / `--token`.")
             return 1
