@@ -4,7 +4,7 @@
 
 Read this platform guide before running `entroflow connect homeassistant`.
 
-Home Assistant uses command-line token authentication. EntroFlow does not use a web login page for this platform.
+Home Assistant uses connector-managed token authentication. EntroFlow does not use a web login page for this platform.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ Example:
 entroflow connect homeassistant --url http://homeassistant.local:8123 --token eyJ0eXAiOiJKV1Qi...
 ```
 
-The command validates the token against Home Assistant and stores the credential locally in EntroFlow runtime storage.
+The Home Assistant connector validates the token and stores the credential locally in EntroFlow runtime storage.
 
 ## Verify
 

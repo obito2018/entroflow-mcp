@@ -19,7 +19,7 @@ Use CLI for any one-time or low-frequency operation:
 
 - listing currently supported platforms
 - connecting a platform
-- authenticating an account
+- running the platform connection flow
 - listing connected devices
 - downloading a device resource package
 - setting up a device into the local runtime
@@ -58,7 +58,7 @@ entroflow connect <platform>
 ```
 
 Before running `entroflow connect <platform>`, read `~/.entroflow/docs/platforms/<platform>.md` first.
-Each platform has its own login method. Follow the platform guide instead of guessing the login flow from the skill file.
+Each connector implements its own connection method. Do not guess the underlying login or local-runtime flow from the skill file; run the unified command and follow the platform guide.
 
 List devices from connected platforms:
 
@@ -165,6 +165,6 @@ Action names are device-specific by default. Do not assume generic names such as
 
 ## Failure Recovery
 
-- If `entroflow connect` fails, re-run the same command and complete login again.
+- If `entroflow connect` fails, read the connector message and platform guide, fix the missing input or local environment, then re-run the same command.
 - If `entroflow setup` fails because the model is unsupported, stop and tell the user the device is not supported yet.
 - If `device_control` fails because the runtime is missing, the device was not set up correctly. Go back to the CLI flow.

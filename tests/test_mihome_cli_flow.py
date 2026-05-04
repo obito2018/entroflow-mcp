@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import argparse
 import json
 import sys
@@ -28,26 +28,40 @@ class FakeConnector:
         self,
         poll_results: list[dict],
         devices: list[dict] | None = None,
-        qr_file_path: str | None = None,
+        file_path: str | None = None,
     ):
         self._poll_results = list(poll_results)
         self._devices = devices or []
-        self._qr_file_path = qr_file_path
+        self._file_path = file_path
         self.poll_calls = 0
+        self.contexts: list[dict] = []
 
-    def start_qr_login(self, region: str = "cn", login_option: str = "local-page") -> dict:
-        payload = {
+    def connect(self, context: dict) -> dict:
+        self.contexts.append(dict(context))
+        actions = [
+            {
+                "type": "scan_qr",
+                "url": "https://example.com/login",
+                "message": "Scan this code with the platform app.",
+            }
+        ]
+        if context.get("presentation") == "file" and self._file_path:
+            actions.append(
+                {
+                    "type": "open_file",
+                    "file_path": self._file_path,
+                    "message": "Send this file to the user through chat or open it on another device.",
+                }
+            )
+        return {
+            "status": "pending",
             "session_id": "session-1",
-            "qr_url": "https://example.com/login",
             "expires_in": 120,
-            "type": "qrcode",
-            "login_option": login_option,
+            "message": "Complete the connector-provided connection action.",
+            "actions": actions,
         }
-        if login_option == "qr-file" and self._qr_file_path:
-            payload["qr_file_path"] = self._qr_file_path
-        return payload
 
-    def poll_qr_login(self, session_id: str) -> dict:
+    def poll_connect(self, session_id: str, context: dict) -> dict:
         result = self._poll_results[min(self.poll_calls, len(self._poll_results) - 1)]
         self.poll_calls += 1
         return result
@@ -60,13 +74,23 @@ class FakeTokenConnector:
     def __init__(self):
         self.calls: list[dict] = []
 
-    def connect_with_token(self, ha_url: str, ha_token: str) -> dict:
-        self.calls.append({"ha_url": ha_url, "ha_token": ha_token})
+    def connect(self, context: dict) -> dict:
+        self.calls.append(dict(context.get("inputs") or {}))
+        inputs = context.get("inputs") or {}
+        if not inputs.get("url") or not inputs.get("token"):
+            return {
+                "status": "requires_input",
+                "message": "Home Assistant needs a URL and long-lived access token.",
+                "required_inputs": [
+                    {"name": "url", "description": "Home Assistant base URL"},
+                    {"name": "token", "description": "Home Assistant long-lived access token", "secret": True},
+                ],
+            }
         return {
-            "status": "ok",
-            "type": "token",
+            "status": "connected",
             "message": "Home Assistant connected successfully.",
         }
+
 
 
 class MihomeCliFlowTests(unittest.TestCase):
@@ -164,13 +188,13 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(sys, "stdin", NonInteractiveStdin()),
             patch.object(time, "sleep", return_value=None),
         ):
-            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, presentation="auto", input=[], timeout=600, url=None, token=None))
 
         self.assertEqual(rc, 0)
         self.assertEqual(connector.poll_calls, 2)
-        self.assertIn("Non-interactive mode detected; waiting for login confirmation...", printed)
+        self.assertIn("Non-interactive mode detected; waiting for the connector to report connection status...", printed)
 
-    def test_connect_mihome_qr_file_mode_prints_local_file_and_skips_browser(self):
+    def test_connect_mihome_file_presentation_prints_local_file_and_skips_browser(self):
         self._write_platform_devices("mihome", ["old.model"])
         qr_file = str(self.runtime_dir / "mihome-login-session-1.png")
         connector = FakeConnector(
@@ -178,7 +202,7 @@ class MihomeCliFlowTests(unittest.TestCase):
                 {"status": "waiting", "message": "Waiting for confirmation..."},
                 {"status": "ok"},
             ],
-            qr_file_path=qr_file,
+            file_path=qr_file,
         )
         printed: list[str] = []
 
@@ -198,35 +222,19 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(sys, "stdin", NonInteractiveStdin()),
             patch.object(time, "sleep", return_value=None),
         ):
-            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="qr-file"))
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, presentation="file", input=[], timeout=600, url=None, token=None))
 
         self.assertEqual(rc, 0)
         joined = "\n".join(printed)
-        self.assertIn("Login QR code was generated as a local file.", joined)
+        self.assertIn("Send this file to the user through chat or open it on another device.", joined)
         self.assertIn(qr_file, joined)
         self.assertIn("https://example.com/login", joined)
 
-    def test_connect_falls_back_for_legacy_connector_without_login_option_argument(self):
+    def test_connect_rejects_connector_without_v2_connect(self):
         self._write_platform_devices("mihome", ["old.model"])
-        printed: list[str] = []
 
         class LegacyConnector:
-            def __init__(self):
-                self.poll_calls = 0
-
-            def start_qr_login(self, region: str = "cn") -> dict:
-                return {
-                    "session_id": "legacy-session",
-                    "qr_url": "https://example.com/legacy-login",
-                    "expires_in": 120,
-                    "type": "qrcode",
-                }
-
-            def poll_qr_login(self, session_id: str) -> dict:
-                self.poll_calls += 1
-                return {"status": "ok"}
-
-        connector = LegacyConnector()
+            pass
 
         with (
             patch.object(cli, "_refresh_catalog"),
@@ -237,17 +245,11 @@ class MihomeCliFlowTests(unittest.TestCase):
                 "path": str(self._devices_file("mihome")),
                 "count": 12263,
             }),
-            patch.object(loader, "load_connector", return_value=connector),
-            patch.object(cli, "_open_browser", return_value=False),
-            patch.object(cli, "_print", side_effect=printed.append),
-            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+            patch.object(loader, "load_connector", return_value=LegacyConnector()),
             patch.object(sys, "stdin", NonInteractiveStdin()),
         ):
-            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
-
-        self.assertEqual(rc, 0)
-        self.assertEqual(connector.poll_calls, 1)
-        self.assertIn("https://example.com/legacy-login", "\n".join(printed))
+            with self.assertRaisesRegex(RuntimeError, "connector protocol v2"):
+                cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, presentation="auto", input=[], timeout=600, url=None, token=None))
 
     def test_update_refreshes_platform_device_table_even_without_platform_version_change(self):
         config.set_platform_version("mihome", "1.0.3")
@@ -421,7 +423,7 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch("builtins.input", side_effect=AssertionError("input() should not be called")),
             patch.object(sys, "stdin", NonInteractiveStdin()),
         ):
-            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, login_option="local-page"))
+            rc = cli.cmd_connect(argparse.Namespace(platform="mihome", no_prompt=False, presentation="auto", input=[], timeout=600, url=None, token=None))
 
         self.assertEqual(rc, 0)
         self.assertEqual(config.get_platform_version("mihome"), "1.0.4")
@@ -453,16 +455,14 @@ class MihomeCliFlowTests(unittest.TestCase):
             rc = cli.cmd_connect(argparse.Namespace(
                 platform="homeassistant",
                 no_prompt=False,
-                login_option="local-page",
-                url="http://ha.local:8123",
-                token="secret-token",
+                presentation="auto", input=[], timeout=600, url="http://ha.local:8123", token="secret-token",
             ))
 
         self.assertEqual(rc, 0)
-        self.assertEqual(connector.calls, [{"ha_url": "http://ha.local:8123", "ha_token": "secret-token"}])
+        self.assertEqual(connector.calls, [{"url": "http://ha.local:8123", "token": "secret-token"}])
         self.assertIn("Home Assistant connected successfully.", "\n".join(printed))
 
-    def test_connect_homeassistant_requires_direct_token_login(self):
+    def test_connect_homeassistant_reports_required_inputs_without_token(self):
         config.set_platform_version("homeassistant", "1.0.1")
         config.add_connected_iot_platform("homeassistant")
         self._write_connector_client("homeassistant")
@@ -482,15 +482,15 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(loader, "load_connector", return_value=connector),
             patch.object(cli, "_open_browser", side_effect=AssertionError("browser should not be opened")),
             patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+            patch.object(sys, "stdin", NonInteractiveStdin()),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Home Assistant login requires command-line token auth"):
-                cli.cmd_connect(argparse.Namespace(
-                    platform="homeassistant",
-                    no_prompt=False,
-                    login_option="local-page",
-                    url=None,
-                    token=None,
-                ))
+            rc = cli.cmd_connect(argparse.Namespace(
+                platform="homeassistant",
+                no_prompt=False,
+                presentation="auto", input=[], timeout=600, url=None, token=None,
+            ))
+
+        self.assertEqual(rc, 1)
 
     def test_list_platforms_uses_bundled_catalog_when_local_catalog_is_missing(self):
         printed: list[str] = []

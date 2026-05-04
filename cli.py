@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import argparse
+import getpass
 import json
 import sys
 import time
@@ -99,36 +100,150 @@ def _should_wait_for_login_prompt(args: argparse.Namespace) -> bool:
     return _is_interactive_stdin()
 
 
-def _start_platform_login(connector, args: argparse.Namespace, platform: str | None = None) -> dict:
-    direct_login_url = getattr(args, "url", None)
-    direct_login_token = getattr(args, "token", None)
-    if bool(direct_login_url) != bool(direct_login_token):
-        raise RuntimeError("Direct token login requires both --url and --token.")
-    if direct_login_url and direct_login_token:
-        if not hasattr(connector, "connect_with_token"):
-            raise RuntimeError("This platform does not support direct token login.")
-        return connector.connect_with_token(ha_url=direct_login_url, ha_token=direct_login_token)
+def _collect_connect_inputs(args: argparse.Namespace) -> dict:
+    inputs: dict[str, str] = {}
+    for key in ("url", "token"):
+        value = getattr(args, key, None)
+        if value:
+            inputs[key] = str(value)
+    for item in getattr(args, "input", None) or []:
+        if "=" not in item:
+            raise RuntimeError("--input must use key=value format.")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise RuntimeError("--input key cannot be empty.")
+        inputs[key] = value
+    return inputs
 
-    platform_id = str(platform or getattr(args, "platform", "") or "").strip().lower()
-    if platform_id == "homeassistant":
+
+def _connect_presentation(args: argparse.Namespace) -> str:
+    value = str(getattr(args, "presentation", "auto") or "auto").strip().lower()
+    if value not in {"auto", "url", "file", "none"}:
+        raise RuntimeError(f"Unsupported connection presentation: {value}")
+    return value
+
+
+def _build_connect_context(platform: str, args: argparse.Namespace, inputs: dict | None = None) -> dict:
+    return {
+        "protocol_version": "2.0",
+        "platform_id": platform,
+        "runtime_dir": str(Path.home() / ".entroflow" / "runtime"),
+        "interactive": _is_interactive_stdin(),
+        "presentation": _connect_presentation(args),
+        "timeout_seconds": int(getattr(args, "timeout", 600) or 600),
+        "inputs": dict(inputs or {}),
+    }
+
+
+def _connector_connect(connector, context: dict) -> dict:
+    if not hasattr(connector, "connect"):
         raise RuntimeError(
-            "Home Assistant login requires command-line token auth. "
-            "Run `entroflow connect homeassistant --url <home-assistant-url> --token <long-lived-access-token>`."
+            "This platform connector does not implement EntroFlow connector protocol v2. "
+            "Run `entroflow update`; if the issue remains, the platform package must be republished."
         )
+    result = connector.connect(context)
+    if not isinstance(result, dict):
+        raise RuntimeError(f"Connector returned an invalid connect result: {result!r}")
+    return result
 
-    login_option = str(getattr(args, "login_option", "local-page") or "local-page").strip().lower()
-    if login_option not in {"local-page", "qr-file"}:
-        raise RuntimeError(f"Unsupported login option: {login_option}")
 
-    try:
-        return connector.start_qr_login(region="cn", login_option=login_option)
-    except TypeError:
-        # Backward compatibility for already published connectors that do not yet
-        # accept the new login_option argument.
-        result = connector.start_qr_login(region="cn")
-        result = dict(result)
-        result.setdefault("login_option", "local-page")
-        return result
+def _connector_poll_connect(connector, session_id: str, context: dict) -> dict:
+    if not hasattr(connector, "poll_connect"):
+        raise RuntimeError("Connector returned a pending connection but does not implement poll_connect().")
+    result = connector.poll_connect(session_id, context)
+    if not isinstance(result, dict):
+        raise RuntimeError(f"Connector returned an invalid poll result: {result!r}")
+    return result
+
+
+def _connect_status(result: dict) -> str:
+    return str(result.get("status") or "").strip().lower()
+
+
+def _print_connect_actions(actions: list, presentation: str) -> None:
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("type") or "instruction").strip().lower()
+        message = str(action.get("message") or action.get("label") or "").strip()
+        url = str(action.get("url") or action.get("connect_url") or "").strip()
+        file_path = str(action.get("file_path") or action.get("path") or "").strip()
+
+        if message:
+            _print(message)
+
+        if file_path:
+            _print(file_path)
+
+        if url:
+            opened = False
+            if presentation == "auto" and action_type in {"open_url", "complete_form", "scan_qr"}:
+                opened = _open_browser(url)
+            if opened:
+                _print("Opened the connection URL in the default browser.")
+            elif presentation != "none":
+                _print(url)
+
+
+def _print_required_inputs(required_inputs: list) -> None:
+    if not required_inputs:
+        return
+    _print("Required connection inputs:")
+    for item in required_inputs:
+        if isinstance(item, str):
+            _print(f"  - {item}")
+            continue
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or item.get("prompt") or "").strip()
+        secret = " secret" if item.get("secret") else ""
+        if description:
+            _print(f"  - {name}{secret}: {description}")
+        else:
+            _print(f"  - {name}{secret}")
+
+
+def _prompt_required_inputs(required_inputs: list, inputs: dict) -> bool:
+    if not required_inputs or not _is_interactive_stdin():
+        return False
+    changed = False
+    for item in required_inputs:
+        if isinstance(item, str):
+            name = item.strip()
+            prompt = f"{name}: "
+            secret = False
+        elif isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+            prompt = str(item.get("prompt") or item.get("description") or name or "value").strip()
+            if not prompt.endswith(":"):
+                prompt += ":"
+            prompt += " "
+            secret = bool(item.get("secret"))
+        else:
+            continue
+        if not name or inputs.get(name):
+            continue
+        inputs[name] = getpass.getpass(prompt) if secret else input(prompt)
+        changed = True
+    return changed
+
+
+def _print_connect_result(result: dict, presentation: str) -> None:
+    message = str(result.get("message") or "").strip()
+    if message:
+        _print(message)
+    actions = result.get("actions") or []
+    if isinstance(actions, list):
+        _print_connect_actions(actions, presentation)
+    diagnostics = result.get("diagnostics")
+    if isinstance(diagnostics, dict) and diagnostics:
+        _print("Diagnostics:")
+        for key, value in diagnostics.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            _print(f"  {key}: {value}")
 
 
 def _refresh_platform_devices_table(platform: str) -> dict | None:
@@ -340,85 +455,80 @@ def cmd_connect(args: argparse.Namespace) -> int:
         _print(f"Refreshed device support table: {refreshed['count']} models -> {refreshed['path']}")
 
     connector = loader.load_connector(platform)
-    result = _start_platform_login(connector, args, platform)
-    if result.get("status") == "ok" and not result.get("session_id"):
-        config.add_connected_iot_platform(platform)
-        _print(result.get("message") or f"Platform '{platform}' connected successfully.")
-        return 0
-
-    session_id = result.get("session_id")
-    qr_url = result.get("qr_url")
-    expires_in = result.get("expires_in")
-    login_type = str(result.get("type") or "qrcode").strip().lower()
-    login_message = str(result.get("message") or "").strip()
-    login_option = str(result.get("login_option") or getattr(args, "login_option", "local-page")).strip().lower()
-    qr_file_path = str(result.get("qr_file_path") or "").strip()
-
-    if not session_id or not qr_url:
-        raise RuntimeError(f"Unsupported login response for platform '{platform}': {result}")
-
-    _print("")
-    opened = False
-    if login_option != "qr-file":
-        opened = _open_browser(qr_url)
-
-    if login_option == "qr-file":
-        _print("Login QR code was generated as a local file.")
-        if qr_file_path:
-            _print("Send this file to the user through chat or open it on another device for scanning:")
-            _print(qr_file_path)
-        else:
-            _print("QR file path was not returned by the connector. Use the login URL below instead:")
-        _print("If needed, you can still use the local login page:")
-        _print(qr_url)
-    elif login_type == "form":
-        if opened:
-            _print("A browser window was opened for login. Complete the local connection form there.")
-        else:
-            _print("Could not open the browser automatically. Open the following URL and complete the local connection form:")
-        _print(qr_url)
-    else:
-        if opened:
-            _print("A browser window was opened for login. Complete confirmation in the platform app.")
-        else:
-            _print("Could not open the browser automatically. Open the following URL and complete login in the platform app:")
-        _print(qr_url)
-    if expires_in:
-        if login_type == "form":
-            _print(f"Connection form expires in {expires_in} seconds.")
-        else:
-            _print(f"QR code expires in {expires_in} seconds.")
-    if login_message:
-        _print(login_message)
-    _print("")
-
-    if _should_wait_for_login_prompt(args):
-        if login_type == "form":
-            input("Press Enter after you have submitted the connection form...")
-        else:
-            input("Press Enter after you have scanned and confirmed the login...")
-    else:
-        if login_type == "form":
-            _print("Non-interactive mode detected; waiting for the connection form to be submitted...")
-        else:
-            _print("Non-interactive mode detected; waiting for login confirmation...")
+    inputs = _collect_connect_inputs(args)
+    presentation = _connect_presentation(args)
 
     while True:
-        poll = connector.poll_qr_login(session_id)
-        status = poll.get("status", "")
-        if status == "ok":
+        context = _build_connect_context(platform, args, inputs)
+        result = _connector_connect(connector, context)
+        status = _connect_status(result)
+
+        if status in {"connected", "ok"}:
             config.add_connected_iot_platform(platform)
-            _print(f"Platform '{platform}' connected successfully.")
+            _print_connect_result(result, presentation)
+            if not result.get("message"):
+                _print(f"Platform '{platform}' connected successfully.")
             return 0
-        if status == "waiting":
-            wait_message = str(poll.get("message") or "").strip()
-            _print(wait_message or "Still waiting for confirmation...")
-            time.sleep(3)
-            continue
-        if status == "expired":
-            _print("Login QR code expired. Run the command again to get a new code.")
+
+        if status == "requires_input":
+            _print_connect_result(result, presentation)
+            required_inputs = result.get("required_inputs") or []
+            if isinstance(required_inputs, list):
+                _print_required_inputs(required_inputs)
+                if _prompt_required_inputs(required_inputs, inputs):
+                    continue
+            _print("Provide the required values with `--input key=value` or a platform-specific documented shortcut such as `--url` / `--token`.")
             return 1
-        raise RuntimeError(poll.get("message") or f"Login failed for platform '{platform}'.")
+
+        if status in {"requires_environment", "failed", "error", "expired"}:
+            _print_connect_result(result, presentation)
+            if not result.get("message"):
+                _print(f"Platform '{platform}' connection failed ({status}).")
+            return 1
+
+        if status in {"pending", "requires_user_action", "waiting"}:
+            _print("")
+            _print_connect_result(result, presentation)
+            expires_in = result.get("expires_in")
+            if expires_in:
+                _print(f"Connection session expires in {expires_in} seconds.")
+            _print("")
+
+            if _should_wait_for_login_prompt(args):
+                input("Press Enter after completing the requested connection action...")
+            else:
+                _print("Non-interactive mode detected; waiting for the connector to report connection status...")
+
+            session_id = str(result.get("session_id") or "").strip()
+            if not session_id:
+                raise RuntimeError(f"Connector returned '{status}' without session_id: {result}")
+
+            while True:
+                poll = _connector_poll_connect(connector, session_id, _build_connect_context(platform, args, inputs))
+                poll_status = _connect_status(poll)
+                if poll_status in {"connected", "ok"}:
+                    config.add_connected_iot_platform(platform)
+                    _print_connect_result(poll, presentation)
+                    if not poll.get("message"):
+                        _print(f"Platform '{platform}' connected successfully.")
+                    return 0
+                if poll_status in {"pending", "waiting", "requires_user_action"}:
+                    wait_message = str(poll.get("message") or "").strip()
+                    _print(wait_message or "Still waiting for the connector to report connection status...")
+                    time.sleep(3)
+                    continue
+                if poll_status == "requires_input":
+                    _print_connect_result(poll, presentation)
+                    required_inputs = poll.get("required_inputs") or []
+                    if isinstance(required_inputs, list):
+                        _print_required_inputs(required_inputs)
+                    return 1
+                if poll_status in {"requires_environment", "failed", "error", "expired"}:
+                    _print_connect_result(poll, presentation)
+                    return 1
+                raise RuntimeError(f"Unsupported connector poll status '{poll_status}' for platform '{platform}': {poll}")
+
+        raise RuntimeError(f"Unsupported connector status '{status}' for platform '{platform}': {result}")
 
 
 def cmd_list_devices(args: argparse.Namespace) -> int:
@@ -613,14 +723,16 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser = subparsers.add_parser("connect", help="Connect a platform and complete authentication")
     connect_parser.add_argument("platform", help="Platform id or alias, e.g. mihome")
     connect_parser.add_argument("--no-prompt", action="store_true", help="Do not wait for a manual Enter prompt before polling login status")
-    connect_parser.add_argument("--url", help="Platform base URL for direct token-based login, e.g. Home Assistant URL")
-    connect_parser.add_argument("--token", help="Platform access token for direct token-based login")
+    connect_parser.add_argument("--url", help="Connection input shortcut for platforms that require a URL")
+    connect_parser.add_argument("--token", help="Connection input shortcut for platforms that require an access token")
+    connect_parser.add_argument("--input", action="append", default=[], help="Additional connector input in key=value format")
     connect_parser.add_argument(
-        "--login-option",
-        choices=("local-page", "qr-file"),
-        default="local-page",
-        help="Choose how the login QR is presented. Use 'qr-file' for chat-based or headless login flows.",
+        "--presentation",
+        choices=("auto", "url", "file", "none"),
+        default="auto",
+        help="How the CLI should present connector-provided connection actions.",
     )
+    connect_parser.add_argument("--timeout", type=int, default=600, help="Connection session timeout in seconds")
     connect_parser.set_defaults(func=cmd_connect)
 
     list_parser = subparsers.add_parser("list-devices", help="List devices from connected platforms")
