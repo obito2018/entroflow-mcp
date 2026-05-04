@@ -56,6 +56,19 @@ class FakeConnector:
         return list(self._devices)
 
 
+class FakeTokenConnector:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def connect_with_token(self, ha_url: str, ha_token: str) -> dict:
+        self.calls.append({"ha_url": ha_url, "ha_token": ha_token})
+        return {
+            "status": "ok",
+            "type": "token",
+            "message": "Home Assistant connected successfully.",
+        }
+
+
 class MihomeCliFlowTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -413,6 +426,71 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(config.get_platform_version("mihome"), "1.0.4")
         self.assertIn("Updated platform connector mihome (1.0.3 -> v1.0.4)", "\n".join(printed))
+
+    def test_connect_homeassistant_uses_direct_token_login(self):
+        config.set_platform_version("homeassistant", "1.0.1")
+        config.add_connected_iot_platform("homeassistant")
+        self._write_connector_client("homeassistant")
+        self._write_platform_devices("homeassistant", ["ha.hue.light"])
+        connector = FakeTokenConnector()
+        printed: list[str] = []
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(downloader, "download_platform_guide", return_value=None),
+            patch.object(downloader, "get_platform_latest_version", return_value="1.0.1"),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "homeassistant",
+                "path": str(self._devices_file("homeassistant")),
+                "count": 1,
+            }),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_open_browser", side_effect=AssertionError("browser should not be opened")),
+            patch.object(cli, "_print", side_effect=printed.append),
+            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+        ):
+            rc = cli.cmd_connect(argparse.Namespace(
+                platform="homeassistant",
+                no_prompt=False,
+                login_option="local-page",
+                url="http://ha.local:8123",
+                token="secret-token",
+            ))
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(connector.calls, [{"ha_url": "http://ha.local:8123", "ha_token": "secret-token"}])
+        self.assertIn("Home Assistant connected successfully.", "\n".join(printed))
+
+    def test_connect_homeassistant_requires_direct_token_login(self):
+        config.set_platform_version("homeassistant", "1.0.1")
+        config.add_connected_iot_platform("homeassistant")
+        self._write_connector_client("homeassistant")
+        self._write_platform_devices("homeassistant", ["ha.hue.light"])
+        connector = FakeTokenConnector()
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(downloader, "download_platform_guide", return_value=None),
+            patch.object(downloader, "get_platform_latest_version", return_value="1.0.1"),
+            patch.object(downloader, "refresh_platform_devices_file", return_value={
+                "platform_id": "homeassistant",
+                "path": str(self._devices_file("homeassistant")),
+                "count": 1,
+            }),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_open_browser", side_effect=AssertionError("browser should not be opened")),
+            patch("builtins.input", side_effect=AssertionError("input() should not be called")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Home Assistant login requires command-line token auth"):
+                cli.cmd_connect(argparse.Namespace(
+                    platform="homeassistant",
+                    no_prompt=False,
+                    login_option="local-page",
+                    url=None,
+                    token=None,
+                ))
 
     def test_list_platforms_uses_bundled_catalog_when_local_catalog_is_missing(self):
         printed: list[str] = []

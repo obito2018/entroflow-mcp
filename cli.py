@@ -99,7 +99,23 @@ def _should_wait_for_login_prompt(args: argparse.Namespace) -> bool:
     return _is_interactive_stdin()
 
 
-def _start_platform_login(connector, args: argparse.Namespace) -> dict:
+def _start_platform_login(connector, args: argparse.Namespace, platform: str | None = None) -> dict:
+    direct_login_url = getattr(args, "url", None)
+    direct_login_token = getattr(args, "token", None)
+    if bool(direct_login_url) != bool(direct_login_token):
+        raise RuntimeError("Direct token login requires both --url and --token.")
+    if direct_login_url and direct_login_token:
+        if not hasattr(connector, "connect_with_token"):
+            raise RuntimeError("This platform does not support direct token login.")
+        return connector.connect_with_token(ha_url=direct_login_url, ha_token=direct_login_token)
+
+    platform_id = str(platform or getattr(args, "platform", "") or "").strip().lower()
+    if platform_id == "homeassistant":
+        raise RuntimeError(
+            "Home Assistant login requires command-line token auth. "
+            "Run `entroflow connect homeassistant --url <home-assistant-url> --token <long-lived-access-token>`."
+        )
+
     login_option = str(getattr(args, "login_option", "local-page") or "local-page").strip().lower()
     if login_option not in {"local-page", "qr-file"}:
         raise RuntimeError(f"Unsupported login option: {login_option}")
@@ -324,7 +340,12 @@ def cmd_connect(args: argparse.Namespace) -> int:
         _print(f"Refreshed device support table: {refreshed['count']} models -> {refreshed['path']}")
 
     connector = loader.load_connector(platform)
-    result = _start_platform_login(connector, args)
+    result = _start_platform_login(connector, args, platform)
+    if result.get("status") == "ok" and not result.get("session_id"):
+        config.add_connected_iot_platform(platform)
+        _print(result.get("message") or f"Platform '{platform}' connected successfully.")
+        return 0
+
     session_id = result.get("session_id")
     qr_url = result.get("qr_url")
     expires_in = result.get("expires_in")
@@ -592,6 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser = subparsers.add_parser("connect", help="Connect a platform and complete authentication")
     connect_parser.add_argument("platform", help="Platform id or alias, e.g. mihome")
     connect_parser.add_argument("--no-prompt", action="store_true", help="Do not wait for a manual Enter prompt before polling login status")
+    connect_parser.add_argument("--url", help="Platform base URL for direct token-based login, e.g. Home Assistant URL")
+    connect_parser.add_argument("--token", help="Platform access token for direct token-based login")
     connect_parser.add_argument(
         "--login-option",
         choices=("local-page", "qr-file"),
