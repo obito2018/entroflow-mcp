@@ -58,6 +58,7 @@ class McpSetupToolsTests(unittest.TestCase):
 
         self.assertIn("status=pending", result)
         self.assertIn("session_id=session-1", result)
+        self.assertIn("markdown_image=![EntroFlow platform login QR](https://api.entroflow.ai/v1/tmp/login-qr/token)", result)
         self.assertIn("public_url=https://api.entroflow.ai/v1/tmp/login-qr/token", result)
         self.assertIn("file_path=/shared/qr.png", result)
         self.assertIn("platform_connect_qr", result)
@@ -98,6 +99,21 @@ class McpSetupToolsTests(unittest.TestCase):
             result = setup.platform_connect_qr("mihome", "session-1")
 
         self.assertEqual(result, b"file-png")
+
+    def test_platform_connect_qr_url_uploads_connector_bytes(self):
+        class FakeConnector:
+            def get_connect_qr(self, session_id):
+                return b"png-bytes"
+
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup.loader, "load_connector", return_value=FakeConnector()),
+            patch.object(setup, "_upload_temp_qr", return_value="https://api.entroflow.ai/v1/tmp/login-qr/token") as upload,
+        ):
+            result = setup.platform_connect_qr_url("mihome", "session-1")
+
+        self.assertEqual(result, "https://api.entroflow.ai/v1/tmp/login-qr/token")
+        upload.assert_called_once_with(b"png-bytes", 600)
 
     def test_platform_connect_defaults_to_file_presentation_for_remote_agents(self):
         class FakeConnector:

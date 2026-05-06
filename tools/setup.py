@@ -98,6 +98,8 @@ def _attach_public_qr_urls(platform: str, connector: Any, result: dict[str, Any]
     for action in actions:
         if isinstance(action, dict) and str(action.get("type") or "").strip() == "scan_qr":
             action["public_url"] = public_url
+            action["markdown_image"] = f"![EntroFlow platform login QR]({public_url})"
+            action["html_image"] = f'<img src="{public_url}" alt="EntroFlow platform login QR" width="320" />'
             action.setdefault("message", "Scan this QR code with the platform app and confirm login.")
 
 
@@ -166,6 +168,17 @@ def platform_connect_qr(platform: str, session_id: str) -> bytes:
         qr = getter(session_id)
         return _coerce_qr_bytes(qr)
     raise ValueError(f"Platform {platform_id} does not expose a pending QR image for this connection session.")
+
+
+def platform_connect_qr_url(platform: str, session_id: str, qr_bytes: bytes | None = None) -> str:
+    """Return a short-lived public HTTPS URL for a pending connection QR image."""
+    platform_id = cli._resolve_platform_or_exit(platform)
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        raise ValueError("Missing session_id. Call platform_connect first and pass the returned session_id.")
+    if qr_bytes is None:
+        qr_bytes = platform_connect_qr(platform_id, session_id)
+    return _upload_temp_qr(qr_bytes, 600)
 
 
 def _coerce_qr_bytes(value: Any) -> bytes:
@@ -280,18 +293,18 @@ def _format_connect_tool_result(
                 continue
             action_type = str(action.get("type") or "instruction").strip()
             lines.append(f"  [{index}] type={action_type}")
-            for key in ("message", "public_url", "file_path", "sidecar_file_path", "url", "public_url_error"):
+            for key in ("message", "markdown_image", "public_url", "html_image", "file_path", "sidecar_file_path", "url", "public_url_error"):
                 value = str(action.get(key) or "").strip()
                 if value:
                     lines.append(f"      {key}={value}")
             if action_type == "scan_qr" and session_id:
                 lines.append(
-                    f"      show_qr=Prefer showing the public_url if present. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image to the user."
+                    f"      show_qr=Prefer sending markdown_image directly to the user. If the chat cannot render it, send public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image."
                 )
 
     if session_id and not final:
         lines.append(
-            f"next=If a scan_qr action is present, show its public_url to the user when available; otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
+            f"next=If a scan_qr action is present, send markdown_image directly to the user when available; if it cannot render, send public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
         )
     return "\n".join(lines) if lines else "OK"
 

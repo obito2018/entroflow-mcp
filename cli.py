@@ -458,6 +458,8 @@ def _collect_connect_inputs(args: argparse.Namespace) -> dict:
 
 def _connect_presentation(args: argparse.Namespace) -> str:
     value = str(getattr(args, "presentation", "auto") or "auto").strip().lower()
+    if value == "qr":
+        return "file"
     if value not in {"auto", "url", "file", "none"}:
         raise RuntimeError(f"Unsupported connection presentation: {value}")
     return value
