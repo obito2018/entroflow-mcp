@@ -63,6 +63,18 @@ def _detect_openclaw_docker() -> tuple[bool, str]:
     return False, "no running OpenClaw container detected"
 
 
+def _path_status(path: Path, marker: str | None = None) -> str:
+    if not path.exists():
+        return "missing"
+    if marker is None:
+        return "present"
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        return f"unreadable ({exc})"
+    return "present" if marker in content else "present, marker missing"
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     del args
     _print("EntroFlow Doctor")
@@ -77,6 +89,21 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     _print(f"  stdio command: {sys.executable} {Path(__file__).resolve().parent / 'server.py'}")
     _print(f"  http transport: streamable-http")
     _print(f"  http url     : http://127.0.0.1:{os.environ.get('ENTROFLOW_MCP_PORT', '8732')}{os.environ.get('ENTROFLOW_MCP_PATH', '/mcp')}")
+    _print("")
+    _print("Agent capability registration:")
+    home = Path.home()
+    capability_marker = "EntroFlow Capability"
+    agent_paths = [
+        ("generic skill", home / ".agents" / "skills" / "entroflow" / "SKILL.md", "EntroFlow Skill Guide"),
+        ("generic note", home / ".agents" / "skills" / "entroflow" / "ENTROFLOW.md", capability_marker),
+        ("codex skill", home / ".codex" / "skills" / "entroflow" / "SKILL.md", "EntroFlow Skill Guide"),
+        ("codex note", home / ".codex" / "skills" / "entroflow" / "ENTROFLOW.md", capability_marker),
+        ("openclaw skill", home / ".openclaw" / "skills" / "entroflow" / "SKILL.md", "EntroFlow Skill Guide"),
+        ("openclaw note", home / ".openclaw" / "skills" / "entroflow" / "ENTROFLOW.md", capability_marker),
+        ("openclaw bootstrap", home / ".openclaw" / "AGENTS.md", "ENTROFLOW START"),
+    ]
+    for label, path, marker in agent_paths:
+        _print(f"  {label:<18}: {_path_status(path, marker)}")
     _print("")
     found_openclaw, detail = _detect_openclaw_docker()
     _print("Docker agents:")
