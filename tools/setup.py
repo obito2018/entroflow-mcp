@@ -100,6 +100,11 @@ def _attach_public_qr_urls(platform: str, connector: Any, result: dict[str, Any]
             action["public_url"] = public_url
             action["markdown_image"] = f"![EntroFlow platform login QR]({public_url})"
             action["html_image"] = f'<img src="{public_url}" alt="EntroFlow platform login QR" width="320" />'
+            action["openclaw_message_send"] = (
+                "Use the OpenClaw Message tool with action='send', target=<current chat target>, "
+                f"media='{public_url}', and message='请用米家 App 扫描二维码并确认登录'. "
+                "Do not omit target and do not send the local file path as plain text."
+            )
             action.setdefault("message", "Scan this QR code with the platform app and confirm login.")
 
 
@@ -293,18 +298,28 @@ def _format_connect_tool_result(
                 continue
             action_type = str(action.get("type") or "instruction").strip()
             lines.append(f"  [{index}] type={action_type}")
-            for key in ("message", "markdown_image", "public_url", "html_image", "file_path", "sidecar_file_path", "url", "public_url_error"):
+            for key in (
+                "message",
+                "openclaw_message_send",
+                "markdown_image",
+                "public_url",
+                "html_image",
+                "file_path",
+                "sidecar_file_path",
+                "url",
+                "public_url_error",
+            ):
                 value = str(action.get(key) or "").strip()
                 if value:
                     lines.append(f"      {key}={value}")
             if action_type == "scan_qr" and session_id:
                 lines.append(
-                    f"      show_qr=Prefer sending markdown_image directly to the user. If the chat cannot render it, send public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image."
+                    f"      show_qr=On OpenClaw, prefer Message action='send' with target=<current chat target> and media=public_url. If no Message tool is available, send markdown_image or public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image."
                 )
 
     if session_id and not final:
         lines.append(
-            f"next=If a scan_qr action is present, send markdown_image directly to the user when available; if it cannot render, send public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
+            f"next=If a scan_qr action is present on OpenClaw, use the Message tool with action='send', target=<current chat target>, and media=public_url to send the QR image directly. If Message is unavailable, send markdown_image or public_url. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
         )
     return "\n".join(lines) if lines else "OK"
 

@@ -22,7 +22,7 @@ For a new user, platform, or device:
 2. Confirm the exact platform id.
 3. Before connecting, read the platform guide if available at `~/.entroflow/docs/platforms/<platform>.md`.
 4. Connect with `entroflow connect <platform>` or MCP `platform_connect(platform, ...)`.
-5. If MCP `platform_connect` returns a pending `session_id` with a `scan_qr` action, send `markdown_image` directly to the user when present. If it cannot render, send `public_url`. If neither is present, call `platform_connect_qr(platform, session_id)` and show the returned Markdown/image result to the user. Then call `platform_connect_poll(platform, session_id)` after the user scans/confirms.
+5. If MCP `platform_connect` returns a pending `session_id` with a `scan_qr` action, send the QR image directly to the user. In OpenClaw, use the Message tool with `action='send'`, `target=<current chat target>`, and `media=<public_url>`; never omit `target`. If the Message tool is unavailable, send `markdown_image` or `public_url`. If neither is present, call `platform_connect_qr(platform, session_id)` and show the returned Markdown/image result to the user. Then call `platform_connect_poll(platform, session_id)` after the user scans/confirms.
 6. List discovered devices with `entroflow list-devices --platform <platform>` or MCP `platform_devices(platform)`.
 7. Ask the user which exact device to set up.
 8. Ask the user to confirm `name`, `location`, and `remark`; do not invent these values. Put user-facing aliases such as "main light" in `name` or `remark` during setup.
@@ -67,7 +67,7 @@ entroflow_update()
 
 MCP `platform_connect` is non-blocking. It starts the platform-specific connection flow and returns `status`, optional `session_id`, and connector-defined actions. Do not wait inside the same tool call for the user to scan or confirm.
 
-For a `scan_qr` action, prefer sending the returned `markdown_image` directly to the user so the QR displays inline. If the chat cannot render Markdown images, send `public_url`. It is a short-lived HTTPS fallback that works for Docker, remote chat, and headless agents. If neither is present, use `platform_connect_qr(platform, session_id)` and show its Markdown/image result. Do not try to send the returned local file path as a chat attachment; some agents restrict attachment paths. After the user scans and confirms, call `platform_connect_poll` with the same `session_id`.
+For a `scan_qr` action, prefer the agent's native image-send tool. In OpenClaw, use the Message tool with `action='send'`, `target=<current chat target>`, `media=<public_url>`, and a short message asking the user to scan. The `target` must come from the current chat/message context; do not call Message without it. If native image sending is unavailable, send the returned `markdown_image`; if Markdown image rendering fails, send `public_url`. It is a short-lived HTTPS fallback that works for Docker, remote chat, and headless agents. If neither is present, use `platform_connect_qr(platform, session_id)` and show its Markdown/image result. Do not try to send the returned local file path as a chat attachment; some agents restrict attachment paths. After the user scans and confirms, call `platform_connect_poll` with the same `session_id`.
 
 Runtime tools:
 
