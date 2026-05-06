@@ -95,6 +95,18 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertEqual(connector.session_id, "session-1")
         add_connected.assert_called_once_with("mihome")
 
+    def test_prepare_platform_connector_clears_connector_cache_after_update(self):
+        with (
+            patch.object(setup.cli.downloader, "download_platform_guide", return_value=None),
+            patch.object(setup.cli, "_ensure_platform_connector_ready", return_value={"status": "updated", "version": "1.0.7"}),
+            patch.object(setup.cli, "_refresh_platform_devices_table", return_value=None),
+            patch.object(setup.loader, "clear_connector_cache") as clear_cache,
+        ):
+            report = setup._prepare_platform_connector("mihome")
+
+        self.assertEqual(report["connector"]["version"], "1.0.7")
+        clear_cache.assert_called_once_with("mihome")
+
     def test_platform_devices_maps_empty_platform_to_none(self):
         seen = {}
 

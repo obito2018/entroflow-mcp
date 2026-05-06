@@ -11,6 +11,18 @@ RUNTIME_DIR = Path.home() / ".entroflow" / "runtime"
 _module_cache: Dict[str, Any] = {}
 
 
+def clear_connector_cache(platform: str | None = None) -> None:
+    if platform:
+        name = f"ef_connector_{platform}"
+        _module_cache.pop(name, None)
+        sys.modules.pop(name, None)
+        return
+    for name in list(_module_cache):
+        if name.startswith("ef_connector_"):
+            _module_cache.pop(name, None)
+            sys.modules.pop(name, None)
+
+
 def _load_module(name: str, file_path: Path):
     if name in _module_cache:
         return _module_cache[name]

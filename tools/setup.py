@@ -104,6 +104,7 @@ def _prepare_platform_connector(platform: str) -> dict[str, Any]:
 
     connector_result = cli._ensure_platform_connector_ready(platform)
     report["connector"] = connector_result
+    loader.clear_connector_cache(platform)
     try:
         refreshed = cli._refresh_platform_devices_table(platform)
         if refreshed:
