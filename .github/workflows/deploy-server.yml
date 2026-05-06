@@ -9,9 +9,11 @@ on:
       - 'cli.py'
       - 'skill.md'
       - 'requirements.txt'
+      - 'Dockerfile'
       - 'assets/**'
       - 'core/**'
       - 'tools/**'
+      - 'docs/**'
       - '.github/workflows/deploy-server.yml'
 
 jobs:
@@ -34,9 +36,11 @@ jobs:
             cli.py \
             skill.md \
             requirements.txt \
+            Dockerfile \
             assets \
             core \
             tools \
+            docs \
             --exclude "**/__pycache__/*" \
             --exclude "**/*.pyc"
 

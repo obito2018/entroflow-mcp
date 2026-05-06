@@ -1,0 +1,11 @@
+.git
+.github
+worker
+__pycache__
+*.pyc
+.pytest_cache
+.hypothesis
+.env
+.env.*
+.DS_Store
+dist

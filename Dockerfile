@@ -9,7 +9,12 @@ RUN useradd --create-home --home-dir /home/entroflow --shell /usr/sbin/nologin e
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . ./
+COPY server.py cli.py skill.md requirements.txt ./
+COPY core ./core
+COPY tools ./tools
+COPY docs ./docs
+COPY assets ./assets
+
 RUN mkdir -p /home/entroflow/.entroflow &&     chown -R entroflow:entroflow /home/entroflow /app
 
 USER entroflow
