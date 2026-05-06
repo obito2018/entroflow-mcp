@@ -102,6 +102,34 @@ class UninstallCliTests(unittest.TestCase):
         self.assertFalse((entroflow / "core").exists())
         self.assertFalse((entroflow / ".venv").exists())
 
+    def test_uninstall_removes_openclaw_sidecar_data_by_default(self):
+        sidecar_data = self.home / ".openclaw" / "entroflow"
+        (sidecar_data / "runtime").mkdir(parents=True)
+        (sidecar_data / "runtime" / "mihome_auth.json").write_text("{}", encoding="utf-8")
+
+        with (
+            patch.object(cli.Path, "home", return_value=self.home),
+            patch.object(cli, "_run_command", return_value=(0, "removed")),
+        ):
+            rc = cli.cmd_uninstall(self._args(skip_sidecar=False))
+
+        self.assertEqual(rc, 0)
+        self.assertFalse(sidecar_data.exists())
+
+    def test_keep_data_preserves_openclaw_sidecar_data(self):
+        sidecar_data = self.home / ".openclaw" / "entroflow"
+        (sidecar_data / "runtime").mkdir(parents=True)
+        (sidecar_data / "runtime" / "mihome_auth.json").write_text("{}", encoding="utf-8")
+
+        with (
+            patch.object(cli.Path, "home", return_value=self.home),
+            patch.object(cli, "_run_command", return_value=(0, "removed")),
+        ):
+            rc = cli.cmd_uninstall(self._args(skip_sidecar=False, keep_data=True))
+
+        self.assertEqual(rc, 0)
+        self.assertTrue((sidecar_data / "runtime" / "mihome_auth.json").exists())
+
     def test_non_interactive_uninstall_requires_yes(self):
         class NonInteractive:
             def isatty(self):

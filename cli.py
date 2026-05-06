@@ -247,6 +247,17 @@ def _remove_sidecar(report: list[str]) -> None:
         report.append(f"SKIP Docker sidecar: {output or 'container not found'}")
 
 
+def _remove_sidecar_data(home: Path, keep_data: bool, report: list[str]) -> None:
+    sidecar_data = home / ".openclaw" / "entroflow"
+    if keep_data:
+        if sidecar_data.exists():
+            report.append(f"OK   OpenClaw sidecar data: kept {sidecar_data}")
+        else:
+            report.append("SKIP OpenClaw sidecar data: not found")
+        return
+    _remove_path(sidecar_data, "OpenClaw sidecar data", report)
+
+
 def _remove_agent_registrations(home: Path, report: list[str]) -> None:
     _remove_path(home / ".agents" / "skills" / "entroflow", "generic skill", report)
     _remove_path(home / ".claude" / "skills" / "entroflow", "Claude skill", report)
@@ -331,6 +342,8 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     report: list[str] = []
     if not getattr(args, "skip_sidecar", False):
         _remove_sidecar(report)
+        if not getattr(args, "agents_only", False):
+            _remove_sidecar_data(home, getattr(args, "keep_data", False), report)
     if not getattr(args, "runtime_only", False):
         _remove_agent_registrations(home, report)
     if not getattr(args, "agents_only", False):
@@ -1095,12 +1108,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser("doctor", help="Diagnose EntroFlow installation and agent integration")
     doctor_parser.set_defaults(func=cmd_doctor)
 
-    uninstall_parser = subparsers.add_parser("uninstall", help="Remove EntroFlow runtime, agent registrations, and Docker sidecar")
+    uninstall_parser = subparsers.add_parser("uninstall", help="Remove EntroFlow runtime, agent registrations, Docker sidecar, and sidecar data")
     uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Do not ask for interactive confirmation")
-    uninstall_parser.add_argument("--keep-data", action="store_true", help="Keep config.json, data/, runtime/, and assets/ under ~/.entroflow")
+    uninstall_parser.add_argument("--keep-data", action="store_true", help="Keep EntroFlow user data, including ~/.entroflow and OpenClaw sidecar data")
     uninstall_parser.add_argument("--agents-only", action="store_true", help="Only remove agent MCP/skill/rule registrations")
     uninstall_parser.add_argument("--runtime-only", action="store_true", help="Only remove EntroFlow runtime files and CLI launcher")
-    uninstall_parser.add_argument("--skip-sidecar", action="store_true", help="Do not remove the Docker sidecar container")
+    uninstall_parser.add_argument("--skip-sidecar", action="store_true", help="Do not remove the Docker sidecar container or its OpenClaw sidecar data")
     uninstall_parser.set_defaults(func=cmd_uninstall)
 
     return parser
