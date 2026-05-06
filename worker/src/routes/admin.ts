@@ -889,6 +889,72 @@ async function upsertPublishedPlatformGuide(
 export async function handleInternalPublishRoutes(path: string, request: Request, env: Env): Promise<Response | null> {
   if (request.method !== "POST") return null;
 
+  if (path === "/v1/internal/publish/server") {
+    const authError = await requireInternalPublisher(request, env);
+    if (authError) return authError;
+
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const version = (formData.get("version") as string | null)?.trim() || "";
+    const dry_run = parseBooleanFormValue(formData.get("dry_run"), false);
+    const overwrite = parseBooleanFormValue(formData.get("overwrite"), true);
+
+    if (!file) return badRequest("file is required");
+    if (!version) return badRequest("version is required");
+    if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/.test(version)) {
+      return badRequest("version must look like 1.2.3");
+    }
+
+    const bytes = await file.arrayBuffer();
+    let inspected: { hasServerPy: boolean; hasCliPy: boolean; hasRequirementsTxt: boolean };
+    try {
+      const zip = await JSZip.loadAsync(bytes);
+      const files = Object.values(zip.files).filter((item) => !item.dir);
+      const names = files.map((item) => item.name.replace(/\\/g, "/").toLowerCase());
+      inspected = {
+        hasServerPy: names.includes("server.py") || names.some((name) => name.endsWith("/server.py")),
+        hasCliPy: names.includes("cli.py") || names.some((name) => name.endsWith("/cli.py")),
+        hasRequirementsTxt: names.includes("requirements.txt") || names.some((name) => name.endsWith("/requirements.txt")),
+      };
+      if (!inspected.hasServerPy || !inspected.hasCliPy || !inspected.hasRequirementsTxt) {
+        return badRequest("Server ZIP must include server.py, cli.py, and requirements.txt.");
+      }
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Invalid server ZIP");
+    }
+
+    if (dry_run) {
+      return jsonResponse({
+        ok: true,
+        mode: "dry_run",
+        version,
+        ...inspected,
+      });
+    }
+
+    const zipKey = `server/v${version}.zip`;
+    const existingZip = await env.ASSETS.get(zipKey);
+    if (existingZip && !overwrite) {
+      return badRequest("server version already exists; set overwrite=true to replace it");
+    }
+
+    await env.ASSETS.put(zipKey, bytes, {
+      httpMetadata: { contentType: file.type || "application/zip" },
+    });
+    await env.ASSETS.put("server/latest.json", JSON.stringify({ version }), {
+      httpMetadata: { contentType: "application/json" },
+    });
+
+    return jsonResponse({
+      ok: true,
+      mode: "publish",
+      overwritten_version: Boolean(existingZip),
+      version,
+      zip_r2_key: zipKey,
+      ...inspected,
+    }, existingZip ? 200 : 201);
+  }
+
   if (path === "/v1/internal/publish/docs") {
     const authError = await requireInternalPublisher(request, env);
     if (authError) return authError;
