@@ -8,8 +8,11 @@ container.
 import argparse
 import contextlib
 import io
+import os
 from pathlib import Path
 from typing import Any, Callable
+
+import httpx
 
 import cli
 from core import config, loader
@@ -63,10 +66,63 @@ def platform_connect(
     args = _connect_namespace(platform_id, merged_inputs, presentation, timeout)
     context = cli._build_connect_context(platform_id, args, merged_inputs)
     result = cli._connector_connect(connector, context)
+    _attach_public_qr_urls(platform_id, connector, result)
     status = cli._connect_status(result)
     if status in {"connected", "ok"}:
         config.add_connected_iot_platform(platform_id)
     return _format_connect_tool_result(platform_id, result, prepared, final=status in {"connected", "ok"})
+
+
+def _attach_public_qr_urls(platform: str, connector: Any, result: dict[str, Any]) -> None:
+    session_id = str(result.get("session_id") or "").strip()
+    if not session_id:
+        return
+    actions = result.get("actions")
+    if not isinstance(actions, list):
+        return
+    has_scan_qr = any(isinstance(action, dict) and str(action.get("type") or "").strip() == "scan_qr" for action in actions)
+    if not has_scan_qr:
+        return
+    try:
+        getter = getattr(connector, "get_connect_qr", None)
+        if not callable(getter):
+            return
+        qr_bytes = _coerce_qr_bytes(getter(session_id))
+        ttl_seconds = _ttl_from_result(result)
+        public_url = _upload_temp_qr(qr_bytes, ttl_seconds)
+    except Exception as exc:
+        for action in actions:
+            if isinstance(action, dict) and str(action.get("type") or "").strip() == "scan_qr":
+                action.setdefault("public_url_error", str(exc))
+        return
+    for action in actions:
+        if isinstance(action, dict) and str(action.get("type") or "").strip() == "scan_qr":
+            action["public_url"] = public_url
+            action.setdefault("message", "Scan this QR code with the platform app and confirm login.")
+
+
+def _ttl_from_result(result: dict[str, Any]) -> int:
+    try:
+        value = int(result.get("expires_in") or 600)
+    except (TypeError, ValueError):
+        value = 600
+    return max(1, min(value, 600))
+
+
+def _upload_temp_qr(qr_bytes: bytes, ttl_seconds: int) -> str:
+    if os.environ.get("ENTROFLOW_DISABLE_PUBLIC_QR_URL", "").strip().lower() in {"1", "true", "yes"}:
+        raise RuntimeError("Public QR URL upload is disabled by ENTROFLOW_DISABLE_PUBLIC_QR_URL.")
+    api_origin = os.environ.get("ENTROFLOW_PUBLIC_API_ORIGIN", "https://api.entroflow.ai").rstrip("/")
+    files = {"file": ("login-qr.png", qr_bytes, "image/png")}
+    data = {"ttl_seconds": str(max(1, min(int(ttl_seconds), 600)))}
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.post(f"{api_origin}/v1/tmp/login-qr", files=files, data=data)
+        resp.raise_for_status()
+        payload = resp.json()
+    public_url = str(payload.get("url") or "").strip()
+    if not public_url:
+        raise RuntimeError("Temporary QR upload did not return a URL.")
+    return public_url
 
 
 def platform_connect_poll(
@@ -224,18 +280,18 @@ def _format_connect_tool_result(
                 continue
             action_type = str(action.get("type") or "instruction").strip()
             lines.append(f"  [{index}] type={action_type}")
-            for key in ("message", "file_path", "sidecar_file_path", "url"):
+            for key in ("message", "public_url", "file_path", "sidecar_file_path", "url", "public_url_error"):
                 value = str(action.get(key) or "").strip()
                 if value:
                     lines.append(f"      {key}={value}")
             if action_type == "scan_qr" and session_id:
                 lines.append(
-                    f"      show_qr=Call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image to the user."
+                    f"      show_qr=Prefer showing the public_url if present. Otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image to the user."
                 )
 
     if session_id and not final:
         lines.append(
-            f"next=If a scan_qr action is present, call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image before asking the user to scan. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
+            f"next=If a scan_qr action is present, show its public_url to the user when available; otherwise call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
         )
     return "\n".join(lines) if lines else "OK"
 

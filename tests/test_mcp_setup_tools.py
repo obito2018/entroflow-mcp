@@ -40,11 +40,16 @@ class McpSetupToolsTests(unittest.TestCase):
                     "actions": [{"type": "scan_qr", "file_path": "/shared/qr.png"}],
                 }
 
+            def get_connect_qr(self, session_id):
+                self.qr_session_id = session_id
+                return b"png-bytes"
+
         connector = FakeConnector()
         with (
             patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
             patch.object(setup, "_prepare_platform_connector", return_value={"connector": {"status": "ready", "version": "1.0.6"}}),
             patch.object(setup.loader, "load_connector", return_value=connector),
+            patch.object(setup, "_upload_temp_qr", return_value="https://api.entroflow.ai/v1/tmp/login-qr/token"),
         ):
             result = setup.platform_connect(
                 "mihome",
@@ -53,9 +58,11 @@ class McpSetupToolsTests(unittest.TestCase):
 
         self.assertIn("status=pending", result)
         self.assertIn("session_id=session-1", result)
+        self.assertIn("public_url=https://api.entroflow.ai/v1/tmp/login-qr/token", result)
         self.assertIn("file_path=/shared/qr.png", result)
         self.assertIn("platform_connect_qr", result)
         self.assertIn("platform_connect_poll", result)
+        self.assertEqual(connector.qr_session_id, "session-1")
         self.assertEqual(connector.context["presentation"], "file")
         self.assertEqual(connector.context["inputs"], {"room": "lab"})
 

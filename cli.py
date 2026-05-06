@@ -506,6 +506,7 @@ def _print_connect_actions(actions: list, presentation: str) -> None:
             continue
         action_type = str(action.get("type") or "instruction").strip().lower()
         message = str(action.get("message") or action.get("label") or "").strip()
+        public_url = str(action.get("public_url") or "").strip()
         url = str(action.get("url") or action.get("connect_url") or "").strip()
         file_path = str(action.get("file_path") or action.get("path") or "").strip()
 
@@ -514,6 +515,9 @@ def _print_connect_actions(actions: list, presentation: str) -> None:
 
         if file_path:
             _print(file_path)
+
+        if public_url:
+            _print(public_url)
 
         if url:
             opened = False

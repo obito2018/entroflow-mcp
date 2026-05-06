@@ -29,10 +29,12 @@ class FakeConnector:
         poll_results: list[dict],
         devices: list[dict] | None = None,
         file_path: str | None = None,
+        public_url: str | None = None,
     ):
         self._poll_results = list(poll_results)
         self._devices = devices or []
         self._file_path = file_path
+        self._public_url = public_url
         self.poll_calls = 0
         self.contexts: list[dict] = []
 
@@ -45,6 +47,8 @@ class FakeConnector:
                 "message": "Scan this code with the platform app.",
             }
         ]
+        if self._public_url:
+            actions[0]["public_url"] = self._public_url
         if context.get("presentation") == "file" and self._file_path:
             actions.append(
                 {
@@ -203,6 +207,7 @@ class MihomeCliFlowTests(unittest.TestCase):
                 {"status": "ok"},
             ],
             file_path=qr_file,
+            public_url="https://api.entroflow.ai/v1/tmp/login-qr/test-token",
         )
         printed: list[str] = []
 
@@ -228,6 +233,7 @@ class MihomeCliFlowTests(unittest.TestCase):
         joined = "\n".join(printed)
         self.assertIn("Send this file to the user through chat or open it on another device.", joined)
         self.assertIn(qr_file, joined)
+        self.assertIn("https://api.entroflow.ai/v1/tmp/login-qr/test-token", joined)
         self.assertIn("https://example.com/login", joined)
 
     def test_connect_rejects_connector_without_v2_connect(self):

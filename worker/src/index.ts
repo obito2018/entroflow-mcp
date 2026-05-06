@@ -7,6 +7,7 @@ import { handleOAuthRoutes } from "./routes/oauth";
 import { handleEmailAuthRoutes } from "./routes/email_auth";
 import { handleDownloadRoutes } from "./routes/download";
 import { handleAdminRoutes, handleInternalPublishRoutes } from "./routes/admin";
+import { handleTempQrRoutes } from "./routes/temp_qr";
 
 export { Env };
 
@@ -35,6 +36,12 @@ export default {
       // /v1/internal/* - Internal publish routes
       if (path.startsWith("/v1/internal/")) {
         const res = await handleInternalPublishRoutes(path, request, env);
+        if (res) return res;
+      }
+
+      // /v1/tmp/login-qr* - short-lived public QR image fallback for remote agents
+      if (path.startsWith("/v1/tmp/login-qr")) {
+        const res = await handleTempQrRoutes(path, request, env);
         if (res) return res;
       }
 
