@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 EntroFlow MCP Server
-Runtime-only MCP surface for already connected and set up devices.
+Setup and runtime MCP surface for EntroFlow devices.
 """
 import argparse
 import os
@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mcp.server.fastmcp import FastMCP
 
 from tools.device import device_control, device_search, device_status
+from tools.setup import device_setup, entroflow_update, platform_connect, platform_devices, platform_list
 
 Transport = Literal["stdio", "sse", "streamable-http"]
 DEFAULT_HTTP_HOST = "0.0.0.0"
@@ -23,17 +24,21 @@ DEFAULT_SSE_PATH = "/sse"
 DEFAULT_MESSAGE_PATH = "/messages/"
 
 INSTRUCTIONS = (
-    "EntroFlow exposes runtime device operations only.\n"
-    "Use the local guide at ~/.entroflow/skill.md for setup and CLI workflows.\n"
-    "Before using runtime tools, make sure the user has already connected a platform "
-    "with `entroflow connect <platform>` and completed device setup with "
-    "`entroflow setup ...`.\n"
+    "EntroFlow connects agents to physical devices.\n"
+    "Use local CLI commands when the `entroflow` executable is available. "
+    "In Docker sidecar mode, use the MCP setup tools instead.\n"
+    "Setup tools:\n"
+    "- platform_list(query): list supported platforms.\n"
+    "- platform_connect(platform, ...): connect a platform through its connector-defined flow.\n"
+    "- platform_devices(platform): list discovered platform devices and support status.\n"
+    "- device_setup(...): register a discovered device into runtime.\n"
+    "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
     "Runtime tools:\n"
     "- device_search(query): find registered devices and inspect supported actions.\n"
     "- device_status(device_id): read the current device state.\n"
     "- device_control(device_id, action): execute a runtime action.\n"
     "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
-    "Do not attempt installation, login, discovery, or updates through MCP."
+    "Action names are device-specific by default. Do not assume generic names such as set_power."
 )
 
 def _env_int(name: str, default: int) -> int:
@@ -97,6 +102,11 @@ def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
 
 
 def register_tools(mcp: FastMCP) -> FastMCP:
+    mcp.tool()(platform_list)
+    mcp.tool()(platform_connect)
+    mcp.tool()(platform_devices)
+    mcp.tool()(device_setup)
+    mcp.tool()(entroflow_update)
     mcp.tool()(device_search)
     mcp.tool()(device_status)
     mcp.tool()(device_control)
