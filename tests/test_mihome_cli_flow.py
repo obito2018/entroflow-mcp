@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import cli  # noqa: E402
-from core import config, downloader, loader  # noqa: E402
+from core import config, downloader, loader, store  # noqa: E402
 from tools import system as system_tools  # noqa: E402
 
 
@@ -107,6 +107,7 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.docs_dir = self.home / "docs" / "platforms"
         self.runtime_dir = self.home / "runtime"
         self.config_path = self.home / "config.json"
+        self.store_path = self.home / "data" / "devices.json"
         self.bundled_catalog_path = Path(self.temp_dir.name) / "bundled_catalog.json"
         self.bundled_catalog_path.write_text(
             json.dumps(
@@ -136,6 +137,7 @@ class MihomeCliFlowTests(unittest.TestCase):
             patch.object(downloader, "PLATFORM_DOCS_DIR", self.docs_dir),
             patch.object(loader, "ASSETS_DIR", self.assets_dir),
             patch.object(loader, "RUNTIME_DIR", self.runtime_dir),
+            patch.object(store, "STORE_PATH", self.store_path),
             patch.object(system_tools, "ASSETS_DIR", self.assets_dir),
         ]
         for item in self.patches:
@@ -571,6 +573,60 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.assertIn("Platform catalog refresh failed: catalog endpoint down", joined)
         self.assertIn("Continuing with the local cached catalog.", joined)
         self.assertNotIn("Platform catalog refreshed.", joined)
+
+    def test_setup_preserves_homeassistant_discovery_metadata(self):
+        self._write_platform_devices("homeassistant", ["ha.xiaomi.switch.2wpro3"])
+        connector = FakeConnector(
+            poll_results=[],
+            devices=[
+                {
+                    "did": "ha-device-1",
+                    "name": "Xiaomi switch",
+                    "model": "ha.xiaomi.switch.2wpro3",
+                    "raw_model": "Xiaomi Smart Switch Pro 3",
+                    "manufacturer": "Xiaomi",
+                    "ha_device_id": "ha-device-1",
+                    "primary_entity_id": "switch.xiaomi_2wpro3_middle",
+                    "entity_ids": [
+                        "switch.xiaomi_2wpro3_left",
+                        "switch.xiaomi_2wpro3_middle",
+                        "switch.xiaomi_2wpro3_right",
+                    ],
+                }
+            ],
+        )
+        printed: list[str] = []
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(downloader, "download_device", return_value="1.0.0"),
+            patch.object(config, "set_device_version"),
+            patch.object(cli, "_print", side_effect=printed.append),
+        ):
+            rc = cli.cmd_setup(
+                argparse.Namespace(
+                    platform="homeassistant",
+                    did="ha-device-1",
+                    device=None,
+                    model="ha.xiaomi.switch.2wpro3",
+                    version=None,
+                    name="Main light switch",
+                    location="Living room",
+                    remark="Three-gang switch",
+                )
+            )
+
+        self.assertEqual(rc, 0)
+        records = store.load()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["device_id"], "homeassistant:ha-device-1")
+        self.assertEqual(record["entity_ids"], connector._devices[0]["entity_ids"])
+        self.assertEqual(record["primary_entity_id"], "switch.xiaomi_2wpro3_middle")
+        self.assertEqual(record["raw_model"], "Xiaomi Smart Switch Pro 3")
+        self.assertEqual(record["manufacturer"], "Xiaomi")
 
 
 if __name__ == "__main__":

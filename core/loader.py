@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import importlib.util
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -73,6 +74,13 @@ def list_connector_devices(connector):
 def create_device_instance(record: Dict[str, Any]):
     connector = load_connector(record["platform"])
     device_mod = load_device_class(record["platform"], record["model"])
+    signature = inspect.signature(device_mod.DeviceClass)
+    accepts_record = "record" in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if accepts_record:
+        return device_mod.DeviceClass(did=record["did"], connector=connector, record=record)
     return device_mod.DeviceClass(did=record["did"], connector=connector)
 
 

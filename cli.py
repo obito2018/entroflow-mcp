@@ -912,6 +912,19 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
             _print(f"  device_id : {device_id}")
             _print(f"  did       : {did}")
             _print(f"  model     : {model}")
+            if platform == "homeassistant":
+                raw_model = item.get("raw_model")
+                manufacturer = item.get("manufacturer")
+                entity_ids = item.get("entity_ids") or []
+                primary_entity_id = item.get("primary_entity_id")
+                if raw_model and raw_model != model:
+                    _print(f"  ha_model  : {raw_model}")
+                if manufacturer:
+                    _print(f"  maker     : {manufacturer}")
+                if primary_entity_id:
+                    _print(f"  primary   : {primary_entity_id}")
+                if isinstance(entity_ids, list) and entity_ids:
+                    _print(f"  entities  : {len(entity_ids)}")
             _print(f"  support   : {support_text}")
             _print(f"  runtime   : {readiness}")
             if registered_record:
@@ -1013,7 +1026,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
         config.set_device_version(platform, model, downloaded_version)
         _print(f"Installed device driver {model} (v{downloaded_version})")
 
-    result = store.register(did, model, platform, args.name, args.location, args.remark)
+    result = store.register(
+        did,
+        model,
+        platform,
+        args.name,
+        args.location,
+        args.remark,
+        metadata=discovered,
+    )
     if result["ok"]:
         record = result["record"]
         _print(f"Registered device: {record['name']} ({record['device_id']})")

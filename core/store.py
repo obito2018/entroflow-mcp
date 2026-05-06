@@ -31,8 +31,36 @@ def find(device_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def register(did: str, model: str, platform: str,
-             name: str, location: str, remark: str) -> Dict[str, Any]:
+def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+
+    ignored = {"did", "model", "platform", "name", "device_id", "created_at"}
+    result: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key in ignored or value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            result[key] = value
+        elif isinstance(value, list):
+            cleaned = [item for item in value if isinstance(item, (str, int, float, bool, dict))]
+            if cleaned:
+                result[key] = cleaned
+        elif isinstance(value, dict):
+            if value:
+                result[key] = value
+    return result
+
+
+def register(
+    did: str,
+    model: str,
+    platform: str,
+    name: str,
+    location: str,
+    remark: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     device_id = f"{platform}:{did}"
     devices = load()
     for d in devices:
@@ -48,6 +76,7 @@ def register(did: str, model: str, platform: str,
         "remark": remark,
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
+    record.update(_clean_metadata(metadata))
     devices.append(record)
     save(devices)
     return {"ok": True, "record": record}
