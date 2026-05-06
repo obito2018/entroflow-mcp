@@ -335,6 +335,8 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         _remove_agent_registrations(home, report)
     if not getattr(args, "agents_only", False):
         _remove_path(home / ".local" / "bin" / "entroflow", "CLI launcher", report)
+        _remove_path(home / "AppData" / "Local" / "Microsoft" / "WindowsApps" / "entroflow.cmd", "Windows CLI launcher", report)
+        _remove_path(home / ".local" / "bin" / "entroflow.cmd", "Windows fallback CLI launcher", report)
         _remove_entoflow_runtime(home, getattr(args, "keep_data", False), report)
 
     _print("EntroFlow uninstall report:")

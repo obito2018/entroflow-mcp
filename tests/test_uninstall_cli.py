@@ -38,6 +38,9 @@ class UninstallCliTests(unittest.TestCase):
         cli_shim = self.home / ".local" / "bin" / "entroflow"
         cli_shim.parent.mkdir(parents=True)
         cli_shim.write_text("#!/bin/bash\n", encoding="utf-8")
+        windows_shim = self.home / "AppData" / "Local" / "Microsoft" / "WindowsApps" / "entroflow.cmd"
+        windows_shim.parent.mkdir(parents=True)
+        windows_shim.write_text("@echo off\n", encoding="utf-8")
 
         cursor_config = self.home / ".cursor" / "mcp.json"
         cursor_config.parent.mkdir(parents=True)
@@ -67,6 +70,7 @@ class UninstallCliTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertFalse(entroflow.exists())
         self.assertFalse(cli_shim.exists())
+        self.assertFalse(windows_shim.exists())
         self.assertFalse(skill_dir.exists())
         cursor_data = json.loads(cursor_config.read_text(encoding="utf-8"))
         self.assertNotIn("entroflow", cursor_data["mcpServers"])
