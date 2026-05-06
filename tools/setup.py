@@ -45,10 +45,14 @@ def platform_connect(
     url: str = "",
     token: str = "",
     inputs: dict[str, Any] | None = None,
-    presentation: str = "auto",
+    presentation: str = "file",
     timeout: int = 600,
 ) -> str:
-    """Connect an IoT platform through its connector-defined connection flow."""
+    """Connect an IoT platform through its connector-defined connection flow.
+
+    The default presentation is file so remote/chat agents get local QR files or
+    other transferable artifacts instead of a browser-only localhost flow.
+    """
     input_items = []
     for key, value in (inputs or {}).items():
         if value is None:

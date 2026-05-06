@@ -55,6 +55,19 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertEqual(seen["presentation"], "none")
         self.assertEqual(seen["timeout"], 30)
 
+    def test_platform_connect_defaults_to_file_presentation_for_remote_agents(self):
+        seen = {}
+
+        def fake_cmd(args: argparse.Namespace) -> int:
+            seen.update(vars(args))
+            return 0
+
+        with patch.object(setup.cli, "cmd_connect", fake_cmd):
+            result = setup.platform_connect("mihome")
+
+        self.assertEqual(result, "OK")
+        self.assertEqual(seen["presentation"], "file")
+
     def test_platform_devices_maps_empty_platform_to_none(self):
         seen = {}
 
