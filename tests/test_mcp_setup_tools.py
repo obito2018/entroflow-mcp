@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import argparse
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,12 @@ from tools import setup  # noqa: E402
 
 
 class McpSetupToolsTests(unittest.TestCase):
+    def setUp(self):
+        setup._PENDING_DEVICE_SETUP_CONFIRMATIONS.clear()
+
+    def tearDown(self):
+        setup._PENDING_DEVICE_SETUP_CONFIRMATIONS.clear()
+
     def test_platform_list_wraps_cli_output(self):
         seen = {}
 
@@ -189,7 +196,45 @@ class McpSetupToolsTests(unittest.TestCase):
             remark="main purifier",
         )
 
-        self.assertIn("requires explicit user confirmation", result)
+        self.assertIn("requires a valid confirmation_token", result)
+
+    def test_device_setup_prepare_returns_confirmation_token(self):
+        result = setup.device_setup_prepare(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            name="Air Purifier",
+            location="Living Room",
+            remark="main purifier",
+        )
+
+        self.assertIn("Device setup confirmation required", result)
+        self.assertIn("platform=mihome", result)
+        self.assertIn("did=1", result)
+        self.assertRegex(result, r"confirmation_token=\S+")
+
+    def test_device_setup_rejects_token_for_changed_fields(self):
+        prepared = setup.device_setup_prepare(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            name="Air Purifier",
+            location="Living Room",
+            remark="main purifier",
+        )
+        token = re.search(r"confirmation_token=(\S+)", prepared).group(1)
+
+        result = setup.device_setup(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            name="Different Name",
+            location="Living Room",
+            remark="main purifier",
+            confirmation_token=token,
+        )
+
+        self.assertIn("does not match", result)
 
     def test_device_setup_passes_required_registration_fields(self):
         seen = {}
@@ -198,6 +243,17 @@ class McpSetupToolsTests(unittest.TestCase):
             seen.update(vars(args))
             print("Registered device: Air Purifier (mihome:1)")
             return 0
+
+        prepared = setup.device_setup_prepare(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            version="1.0.0",
+            name="Air Purifier",
+            location="Living Room",
+            remark="main purifier",
+        )
+        token = re.search(r"confirmation_token=(\S+)", prepared).group(1)
 
         with patch.object(setup.cli, "cmd_setup", fake_cmd):
             result = setup.device_setup(
@@ -209,6 +265,7 @@ class McpSetupToolsTests(unittest.TestCase):
                 location="Living Room",
                 remark="main purifier",
                 confirmed=True,
+                confirmation_token=token,
             )
 
         self.assertIn("Registered device", result)

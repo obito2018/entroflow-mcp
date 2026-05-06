@@ -9,6 +9,8 @@ import argparse
 import contextlib
 import io
 import os
+import secrets
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +21,53 @@ from core import config, loader
 
 
 CliCommand = Callable[[argparse.Namespace], int | None]
+
+_SETUP_CONFIRMATION_TTL_SECONDS = 600
+_PENDING_DEVICE_SETUP_CONFIRMATIONS: dict[str, dict[str, Any]] = {}
+
+
+def _setup_confirmation_payload(
+    platform: str,
+    did: str,
+    model: str,
+    name: str,
+    location: str,
+    remark: str,
+    version: str = "",
+) -> dict[str, str]:
+    return {
+        "platform": str(platform or "").strip(),
+        "did": str(did or "").strip(),
+        "model": str(model or "").strip(),
+        "name": str(name or "").strip(),
+        "location": str(location or "").strip(),
+        "remark": str(remark or "").strip(),
+        "version": str(version or "").strip(),
+    }
+
+
+def _prune_expired_setup_confirmations(now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    expired = [
+        token
+        for token, item in _PENDING_DEVICE_SETUP_CONFIRMATIONS.items()
+        if float(item.get("expires_at") or 0) <= current
+    ]
+    for token in expired:
+        _PENDING_DEVICE_SETUP_CONFIRMATIONS.pop(token, None)
+
+
+def _validate_setup_confirmation_token(token: str, payload: dict[str, str]) -> str | None:
+    _prune_expired_setup_confirmations()
+    normalized_token = str(token or "").strip()
+    if not normalized_token:
+        return "missing confirmation_token"
+    pending = _PENDING_DEVICE_SETUP_CONFIRMATIONS.get(normalized_token)
+    if not pending:
+        return "invalid or expired confirmation_token"
+    if pending.get("payload") != payload:
+        return "confirmation_token does not match the submitted registration fields"
+    return None
 
 
 def _run_cli(func: CliCommand, namespace: argparse.Namespace) -> str:
@@ -338,6 +387,55 @@ def platform_devices(platform: str = "", supported_only: bool = True) -> str:
     )
 
 
+def device_setup_prepare(
+    platform: str,
+    did: str,
+    model: str,
+    name: str,
+    location: str,
+    remark: str,
+    version: str = "",
+) -> str:
+    """Prepare a device setup confirmation summary and one-time token.
+
+    Call this after the user selects the exact physical/logical device and has
+    provided name, location, and remark. Show the returned summary to the user
+    and ask them to confirm. Only after the user confirms may device_setup be
+    called with the returned confirmation_token.
+    """
+    payload = _setup_confirmation_payload(platform, did, model, name, location, remark, version)
+    missing = [key for key in ("platform", "did", "model", "name", "location", "remark") if not payload[key]]
+    if missing:
+        return f"Refused: missing registration field(s): {', '.join(missing)}. Ask the user before setup."
+
+    _prune_expired_setup_confirmations()
+    token = secrets.token_urlsafe(18)
+    _PENDING_DEVICE_SETUP_CONFIRMATIONS[token] = {
+        "payload": payload,
+        "expires_at": time.time() + _SETUP_CONFIRMATION_TTL_SECONDS,
+    }
+
+    lines = [
+        "Device setup confirmation required.",
+        "Show this exact registration summary to the user and wait for explicit confirmation before setup:",
+        f"platform={payload['platform']}",
+        f"did={payload['did']}",
+        f"model={payload['model']}",
+        f"name={payload['name']}",
+        f"location={payload['location']}",
+        f"remark={payload['remark']}",
+    ]
+    if payload["version"]:
+        lines.append(f"version={payload['version']}")
+    lines.extend(
+        [
+            f"confirmation_token={token}",
+            "next=After the user explicitly confirms this summary, call device_setup with the same fields and this confirmation_token. Do not call device_setup before that confirmation.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def device_setup(
     platform: str,
     did: str,
@@ -347,20 +445,26 @@ def device_setup(
     remark: str,
     version: str = "",
     confirmed: bool = False,
+    confirmation_token: str = "",
 ) -> str:
     """Download the device driver and register a discovered device into runtime.
 
-    Call this only after the user explicitly confirms the exact platform,
-    device_id/did, name, location, and remark. If the user has not confirmed all
-    registration fields in the current conversation, ask first and do not call
-    this tool. Set confirmed=true only after that confirmation.
+    Call this only after device_setup_prepare returned a confirmation_token and
+    the user explicitly confirmed the exact summary containing platform,
+    device_id/did, model, name, location, and remark. The token is one-time and
+    only valid for the same registration fields.
     """
-    if not confirmed:
+    payload = _setup_confirmation_payload(platform, did, model, name, location, remark, version)
+    token_error = _validate_setup_confirmation_token(confirmation_token, payload)
+    if token_error:
         return (
-            "Refused: device_setup requires explicit user confirmation. Ask the user to confirm "
-            "the exact platform, device_id/did, name, location, and remark, then call "
-            "device_setup(..., confirmed=true). Do not infer or invent registration metadata."
+            f"Refused: device_setup requires a valid confirmation_token ({token_error}). "
+            "Call device_setup_prepare with the exact platform, device_id/did, model, name, "
+            "location, and remark; show the returned summary to the user; wait for explicit "
+            "confirmation; then call device_setup with that token. Do not infer or invent "
+            "registration metadata."
         )
+    _PENDING_DEVICE_SETUP_CONFIRMATIONS.pop(str(confirmation_token).strip(), None)
     return _run_cli(
         cli.cmd_setup,
         argparse.Namespace(
@@ -372,7 +476,7 @@ def device_setup(
             name=name,
             location=location,
             remark=remark,
-            confirmed=confirmed,
+            confirmed=True,
         ),
     )
 

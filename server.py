@@ -16,6 +16,7 @@ from mcp.types import TextContent
 
 from tools.device import device_control, device_search, device_status
 from tools.setup import (
+    device_setup_prepare,
     device_setup,
     entroflow_update,
     platform_connect,
@@ -49,8 +50,9 @@ INSTRUCTIONS = (
     "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
     "- platform_connect_qr(platform, session_id): return renderable Markdown/public URL plus the QR image for a pending scan_qr connection action; use it instead of trying to send local file paths as chat attachments.\n"
     "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after the user scans/confirms.\n"
-    "- platform_devices(platform): list discovered platform devices and support status.\n"
-    "- device_setup(...): register a discovered device into runtime.\n"
+    "- platform_devices(platform): list discovered setup candidates and support status.\n"
+    "- device_setup_prepare(...): create a one-time setup confirmation token after the user selected the exact physical/logical device and provided name, location, and remark; show the returned summary to the user and wait for explicit confirmation.\n"
+    "- device_setup(...): register a discovered device into runtime only after the user confirms the device_setup_prepare summary; requires the returned confirmation_token.\n"
     "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
     "Runtime tools:\n"
     "- device_search(query): find registered devices and inspect supported actions.\n"
@@ -61,7 +63,7 @@ INSTRUCTIONS = (
     "If an action needs parameters such as channel, channels, value, brightness, temperature, or mode, "
     "put them inside action.args; do not invent a third top-level tool parameter. "
     "Example: device_control('homeassistant:<device_id>', {'action': 'turn_on', 'args': {'channels': 'middle'}}).\n"
-    "If the device is not returned by device_search, do not control it; use platform_devices and device_setup first.\n"
+    "If the device is not returned by device_search, do not control it; use platform_devices, device_setup_prepare, then device_setup first.\n"
     "For discovered-but-unregistered devices, do not infer aliases such as main light from model, entity names, domains, or supported status; ask the user to select and set up the exact device.\n"
     "Action names are device-specific by default. Do not assume generic names such as set_power."
 )
@@ -145,6 +147,7 @@ def register_tools(mcp: FastMCP) -> FastMCP:
 
     mcp.tool()(platform_connect_poll)
     mcp.tool()(platform_devices)
+    mcp.tool()(device_setup_prepare)
     mcp.tool()(device_setup)
     mcp.tool()(entroflow_update)
     mcp.tool()(device_search)
