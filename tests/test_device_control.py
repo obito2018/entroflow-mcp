@@ -58,6 +58,34 @@ class DeviceControlTests(unittest.TestCase):
         self.assertIn("{'action': '<supported_action>', 'args': {'channels': 'middle'}}", result)
         self.assertEqual(fake.calls, [])
 
+    def test_json_string_action_payload_is_decoded(self):
+        fake = FakeDevice()
+
+        with patch.object(device_tools.store, "find", return_value=self.record), patch.object(
+            device_tools.loader, "create_device_instance", return_value=fake
+        ):
+            result = device_tools.device_control(
+                self.record["device_id"],
+                '{"action": "set_preset_mode", "args": {"preset_mode": "Auto"}}',
+            )
+
+        self.assertIn("set_preset_mode: OK", result)
+        self.assertEqual(fake.calls, [("set_preset_mode", {"preset_mode": "Auto"})])
+
+    def test_json_string_args_payload_is_decoded(self):
+        fake = FakeDevice()
+
+        with patch.object(device_tools.store, "find", return_value=self.record), patch.object(
+            device_tools.loader, "create_device_instance", return_value=fake
+        ):
+            result = device_tools.device_control(
+                self.record["device_id"],
+                {"action": "set_preset_mode", "args": '{"preset_mode": "Auto"}'},
+            )
+
+        self.assertIn("set_preset_mode: OK", result)
+        self.assertEqual(fake.calls, [("set_preset_mode", {"preset_mode": "Auto"})])
+
 
 if __name__ == "__main__":
     unittest.main()

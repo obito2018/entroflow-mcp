@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import json
+
 from core import loader, store
 
 
@@ -90,11 +92,34 @@ def device_control(device_id: str, action: str | dict | list) -> str:
     lines = [f"Device: {record.get('name', '?')} ({device_id})", "Result:"]
     for entry in action_list:
         if isinstance(entry, str):
-            action_name = entry
-            args = {}
+            try:
+                decoded = json.loads(entry)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, dict):
+                action_name = decoded.get("action", "")
+                args = decoded.get("args", {})
+                extra_keys = sorted(k for k in decoded.keys() if k not in {"action", "args"})
+                if extra_keys:
+                    key_list = ", ".join(extra_keys)
+                    lines.append(
+                        f"  {action_name or '(unknown action)'}: skipped because action parameters "
+                        f"must be nested under args; unexpected top-level key(s): {key_list}. "
+                        "Use {'action': '<supported_action>', 'args': {'channels': 'middle'}}."
+                    )
+                    continue
+            else:
+                action_name = entry
+                args = {}
         elif isinstance(entry, dict):
             action_name = entry.get("action", "")
             args = entry.get("args", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    lines.append(f"  {action_name}: skipped because args must be a JSON object string or object")
+                    continue
             extra_keys = sorted(k for k in entry.keys() if k not in {"action", "args"})
             if extra_keys:
                 key_list = ", ".join(extra_keys)
