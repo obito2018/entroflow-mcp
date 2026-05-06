@@ -70,7 +70,15 @@ device_status(device_id)
 device_control(device_id, action)
 ```
 
-Before `device_control`, always run `device_search` for that device and inspect `supported_actions`. Action names are device-specific by default; do not assume generic names such as `set_power`.
+Before `device_control`, always run `device_search` for that device and inspect `supported_actions`. Action names and argument names are device-specific by default; do not assume generic names such as `set_power`.
+
+`device_control` has two top-level tool parameters, but the second `action` parameter can carry action args:
+
+```text
+device_control("homeassistant:<device_id>", {"action": "turn_on", "args": {"channels": "middle"}})
+```
+
+Use the exact action name and arg names shown by `supported_actions`. If a driver needs `channel`, `channels`, `value`, `brightness`, `temperature`, or another action parameter, put it inside `action.args`; do not conclude that `device_control` cannot pass parameters and do not use platform-native APIs as a workaround.
 
 Never use a platform-native API as a shortcut for runtime control. For Home Assistant, do not call HA services directly to turn lights, switches, covers, or other entities on/off. Use `device_setup` first, then `device_control` on the registered EntroFlow device id.
 

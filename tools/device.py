@@ -68,8 +68,15 @@ def device_status(device_id: str) -> str:
         return f"Failed to query device status: {e}"
 
 
-def device_control(device_id: str, action) -> str:
-    """Execute a runtime action on a registered device. Run device_search first to inspect supported_actions."""
+def device_control(device_id: str, action: str | dict | list) -> str:
+    """Execute a runtime action on a registered device.
+
+    Run device_search first to inspect supported_actions. The action parameter may be
+    a string action name, an object like {"action": "turn_on", "args": {...}}, or a
+    list of those entries. Put action-specific parameters such as channel, channels,
+    value, brightness, or temperature inside action.args; do not pass them as
+    separate top-level tool parameters.
+    """
     record = store.find(device_id)
     if not record:
         return f"Device '{device_id}' was not found in EntroFlow runtime. Do not control platform-native entities directly; set up the device first."
@@ -88,6 +95,15 @@ def device_control(device_id: str, action) -> str:
         elif isinstance(entry, dict):
             action_name = entry.get("action", "")
             args = entry.get("args", {})
+            extra_keys = sorted(k for k in entry.keys() if k not in {"action", "args"})
+            if extra_keys:
+                key_list = ", ".join(extra_keys)
+                lines.append(
+                    f"  {action_name or '(unknown action)'}: skipped because action parameters "
+                    f"must be nested under args; unexpected top-level key(s): {key_list}. "
+                    "Use {'action': '<supported_action>', 'args': {'channels': 'middle'}}."
+                )
+                continue
         else:
             lines.append(f"  (skipped: invalid action payload type {type(entry).__name__})")
             continue
