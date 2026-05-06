@@ -43,6 +43,12 @@ class ServerTransportTests(unittest.TestCase):
         mcp = server.create_mcp(args)
         self.assertIsNotNone(mcp)
 
+    def test_register_tools_exposes_platform_connect_qr(self):
+        args = server.parse_args([])
+        mcp = server.register_tools(server.create_mcp(args))
+        tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
+        self.assertIn("platform_connect_qr", tool_names)
+
 
 if __name__ == "__main__":
     unittest.main()

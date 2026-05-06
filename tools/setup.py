@@ -8,6 +8,7 @@ container.
 import argparse
 import contextlib
 import io
+from pathlib import Path
 from typing import Any, Callable
 
 import cli
@@ -91,6 +92,53 @@ def platform_connect_poll(
     if status in {"connected", "ok"}:
         config.add_connected_iot_platform(platform_id)
     return _format_connect_tool_result(platform_id, result, final=status in {"connected", "ok"})
+
+
+def platform_connect_qr(platform: str, session_id: str) -> bytes:
+    """Return the QR image for a pending connector login session.
+
+    Use this immediately after platform_connect returns a scan_qr action. This
+    avoids relying on agent-specific chat attachment allowlists for local files.
+    """
+    platform_id = cli._resolve_platform_or_exit(platform)
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        raise ValueError("Missing session_id. Call platform_connect first and pass the returned session_id.")
+    connector = loader.load_connector(platform_id)
+    getter = getattr(connector, "get_connect_qr", None)
+    if callable(getter):
+        qr = getter(session_id)
+        return _coerce_qr_bytes(qr)
+    raise ValueError(f"Platform {platform_id} does not expose a pending QR image for this connection session.")
+
+
+def _coerce_qr_bytes(value: Any) -> bytes:
+    if isinstance(value, bytes):
+        if value:
+            return value
+        raise ValueError("QR image is empty.")
+    if isinstance(value, bytearray):
+        data = bytes(value)
+        if data:
+            return data
+        raise ValueError("QR image is empty.")
+    if isinstance(value, dict):
+        if isinstance(value.get("data"), (bytes, bytearray)):
+            return _coerce_qr_bytes(value["data"])
+        path = str(value.get("file_path") or value.get("path") or "").strip()
+        if path:
+            return _read_qr_file(path)
+    if isinstance(value, (str, Path)):
+        return _read_qr_file(str(value))
+    raise ValueError("Connector returned an unsupported QR image payload.")
+
+
+def _read_qr_file(path: str) -> bytes:
+    qr_path = Path(path).expanduser()
+    data = qr_path.read_bytes()
+    if not data:
+        raise ValueError(f"QR image is empty: {qr_path}")
+    return data
 
 
 def _prepare_platform_connector(platform: str) -> dict[str, Any]:
@@ -180,9 +228,15 @@ def _format_connect_tool_result(
                 value = str(action.get(key) or "").strip()
                 if value:
                     lines.append(f"      {key}={value}")
+            if action_type == "scan_qr" and session_id:
+                lines.append(
+                    f"      show_qr=Call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image to the user."
+                )
 
     if session_id and not final:
-        lines.append(f"next=Show the action to the user, then call platform_connect_poll(platform='{platform}', session_id='{session_id}').")
+        lines.append(
+            f"next=If a scan_qr action is present, call platform_connect_qr(platform='{platform}', session_id='{session_id}') and show the returned image before asking the user to scan. After the user confirms, call platform_connect_poll(platform='{platform}', session_id='{session_id}')."
+        )
     return "\n".join(lines) if lines else "OK"
 
 

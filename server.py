@@ -11,10 +11,18 @@ from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 
 from tools.device import device_control, device_search, device_status
-from tools.setup import device_setup, entroflow_update, platform_connect, platform_connect_poll, platform_devices, platform_list
+from tools.setup import (
+    device_setup,
+    entroflow_update,
+    platform_connect,
+    platform_connect_poll,
+    platform_connect_qr as get_platform_connect_qr,
+    platform_devices,
+    platform_list,
+)
 
 Transport = Literal["stdio", "sse", "streamable-http"]
 DEFAULT_HTTP_HOST = "0.0.0.0"
@@ -37,6 +45,7 @@ INSTRUCTIONS = (
     "Setup tools:\n"
     "- platform_list(query): list supported platforms.\n"
     "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
+    "- platform_connect_qr(platform, session_id): return the QR image for a pending scan_qr connection action; use it instead of trying to send local file paths as chat attachments.\n"
     "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after the user scans/confirms.\n"
     "- platform_devices(platform): list discovered platform devices and support status.\n"
     "- device_setup(...): register a discovered device into runtime.\n"
@@ -118,6 +127,12 @@ def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
 def register_tools(mcp: FastMCP) -> FastMCP:
     mcp.tool()(platform_list)
     mcp.tool()(platform_connect)
+
+    @mcp.tool()
+    def platform_connect_qr(platform: str, session_id: str) -> Image:
+        """Return the QR image for a pending platform connection session."""
+        return Image(data=get_platform_connect_qr(platform, session_id), format="png")
+
     mcp.tool()(platform_connect_poll)
     mcp.tool()(platform_devices)
     mcp.tool()(device_setup)

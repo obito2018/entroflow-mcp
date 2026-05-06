@@ -54,9 +54,43 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertIn("status=pending", result)
         self.assertIn("session_id=session-1", result)
         self.assertIn("file_path=/shared/qr.png", result)
+        self.assertIn("platform_connect_qr", result)
         self.assertIn("platform_connect_poll", result)
         self.assertEqual(connector.context["presentation"], "file")
         self.assertEqual(connector.context["inputs"], {"room": "lab"})
+
+    def test_platform_connect_qr_returns_connector_bytes(self):
+        class FakeConnector:
+            def get_connect_qr(self, session_id):
+                self.session_id = session_id
+                return b"png-bytes"
+
+        connector = FakeConnector()
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup.loader, "load_connector", return_value=connector),
+        ):
+            result = setup.platform_connect_qr("mihome", "session-1")
+
+        self.assertEqual(result, b"png-bytes")
+        self.assertEqual(connector.session_id, "session-1")
+
+    def test_platform_connect_qr_reads_connector_file(self):
+        qr_path = ROOT / "tests" / "tmp-qr.png"
+        qr_path.write_bytes(b"file-png")
+        self.addCleanup(lambda: qr_path.exists() and qr_path.unlink())
+
+        class FakeConnector:
+            def get_connect_qr(self, session_id):
+                return {"file_path": str(qr_path)}
+
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup.loader, "load_connector", return_value=FakeConnector()),
+        ):
+            result = setup.platform_connect_qr("mihome", "session-1")
+
+        self.assertEqual(result, b"file-png")
 
     def test_platform_connect_defaults_to_file_presentation_for_remote_agents(self):
         class FakeConnector:

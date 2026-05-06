@@ -22,7 +22,7 @@ For a new user, platform, or device:
 2. Confirm the exact platform id.
 3. Before connecting, read the platform guide if available at `~/.entroflow/docs/platforms/<platform>.md`.
 4. Connect with `entroflow connect <platform>` or MCP `platform_connect(platform, ...)`.
-5. If MCP `platform_connect` returns a pending `session_id`, show the returned action to the user and then call `platform_connect_poll(platform, session_id)` after the user scans/confirms.
+5. If MCP `platform_connect` returns a pending `session_id` with a `scan_qr` action, call `platform_connect_qr(platform, session_id)` and show the returned image to the user; then call `platform_connect_poll(platform, session_id)` after the user scans/confirms.
 6. List discovered devices with `entroflow list-devices --platform <platform>` or MCP `platform_devices(platform)`.
 7. Ask the user which exact device to set up.
 8. Ask the user to confirm `name`, `location`, and `remark`; do not invent these values. Put user-facing aliases such as "main light" in `name` or `remark` during setup.
@@ -58,13 +58,16 @@ Setup tools, mainly for Docker sidecar mode:
 ```text
 platform_list(query)
 platform_connect(platform, url, token, inputs, presentation, timeout)
+platform_connect_qr(platform, session_id)
 platform_connect_poll(platform, session_id, url, token, inputs, presentation, timeout)
 platform_devices(platform)
 device_setup(platform, did, model, name, location, remark, version)
 entroflow_update()
 ```
 
-MCP `platform_connect` is non-blocking. It starts the platform-specific connection flow and returns `status`, optional `session_id`, and actions such as a QR file path. Do not wait inside the same tool call for the user to scan. Show the action to the user, then call `platform_connect_poll` with the same `session_id`.
+MCP `platform_connect` is non-blocking. It starts the platform-specific connection flow and returns `status`, optional `session_id`, and connector-defined actions. Do not wait inside the same tool call for the user to scan or confirm.
+
+For a `scan_qr` action, use `platform_connect_qr(platform, session_id)` to display the QR image. Do not try to send the returned local file path as a chat attachment; some agents restrict attachment paths. After the user scans and confirms, call `platform_connect_poll` with the same `session_id`.
 
 Runtime tools:
 
