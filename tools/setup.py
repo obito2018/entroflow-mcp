@@ -23,7 +23,40 @@ from core import config, loader
 CliCommand = Callable[[argparse.Namespace], int | None]
 
 _SETUP_CONFIRMATION_TTL_SECONDS = 600
+_PLATFORM_SELECTION_TTL_SECONDS = 600
+_PENDING_PLATFORM_SELECTIONS: dict[str, dict[str, Any]] = {}
 _PENDING_DEVICE_SETUP_CONFIRMATIONS: dict[str, dict[str, Any]] = {}
+
+
+def _normalize_platform_selection(platform: str) -> str:
+    return str(platform or "").strip()
+
+
+def _prune_expired_platform_selections(now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    expired = [
+        token
+        for token, item in _PENDING_PLATFORM_SELECTIONS.items()
+        if float(item.get("expires_at") or 0) <= current
+    ]
+    for token in expired:
+        _PENDING_PLATFORM_SELECTIONS.pop(token, None)
+
+
+def _validate_platform_selection_token(platform: str, token: str) -> str | None:
+    normalized_platform = _normalize_platform_selection(platform)
+    if not normalized_platform:
+        return None
+    _prune_expired_platform_selections()
+    normalized_token = str(token or "").strip()
+    if not normalized_token:
+        return "missing platform_confirmation_token"
+    pending = _PENDING_PLATFORM_SELECTIONS.get(normalized_token)
+    if not pending:
+        return "invalid or expired platform_confirmation_token"
+    if pending.get("platform") != normalized_platform:
+        return "platform_confirmation_token does not match the requested platform"
+    return None
 
 
 def _setup_confirmation_payload(
@@ -373,17 +406,68 @@ def _format_connect_tool_result(
     return "\n".join(lines) if lines else "OK"
 
 
-def platform_devices(platform: str = "", supported_only: bool = True) -> str:
+def platform_select_prepare(platform: str) -> str:
+    """Prepare confirmation for selecting a platform for new-device setup.
+
+    Use this before listing setup candidates for a specific platform when the
+    user mentions a new or unregistered device. Show the returned prompt to the
+    user and ask whether the new device is on this platform or another platform.
+    After the user confirms this platform, pass the returned token to
+    platform_devices.
+    """
+    platform_id = _normalize_platform_selection(platform)
+    if not platform_id:
+        return "Refused: platform is required. Ask the user which platform the new device belongs to."
+    try:
+        platform_id = cli._resolve_platform_or_exit(platform_id)
+    except Exception as exc:
+        return f"Refused: unknown platform '{platform}'. Run platform_list first. ({exc})"
+    connected = config.get_connected_iot_platforms()
+    if connected and platform_id not in connected:
+        return (
+            f"Refused: platform '{platform_id}' is not connected. Connected platforms: {connected}. "
+            "Ask the user whether to connect this platform first or choose another connected platform."
+        )
+
+    _prune_expired_platform_selections()
+    token = secrets.token_urlsafe(18)
+    _PENDING_PLATFORM_SELECTIONS[token] = {
+        "platform": platform_id,
+        "expires_at": time.time() + _PLATFORM_SELECTION_TTL_SECONDS,
+    }
+    connected_text = ", ".join(connected) if connected else "none recorded"
+    lines = [
+        "Platform selection confirmation required for new-device setup.",
+        f"requested_platform={platform_id}",
+        f"connected_platforms={connected_text}",
+        "Ask the user: Is this new device on the requested platform, or should we use another platform?",
+        f"platform_confirmation_token={token}",
+        "next=Only after the user explicitly confirms this platform, call platform_devices with platform and this platform_confirmation_token. If the user chooses another platform, run platform_select_prepare for that platform instead.",
+    ]
+    return "\n".join(lines)
+
+
+def platform_devices(platform: str = "", supported_only: bool = True, platform_confirmation_token: str = "") -> str:
     """List setup candidates from connected platforms.
 
     Default to supported_only=True for chat agents: show only EntroFlow-supported,
     setup-relevant logical devices. Do not list every Home Assistant entity or ask
-    the user to choose among sibling entities of the same physical device. If the
-    user's requested platform is ambiguous, ask which platform they want before setup.
+    the user to choose among sibling entities of the same physical device. For a
+    specific new-device setup platform, call platform_select_prepare first and
+    pass its platform_confirmation_token after the user confirms the platform.
     """
+    platform_id = _normalize_platform_selection(platform)
+    token_error = _validate_platform_selection_token(platform_id, platform_confirmation_token)
+    if token_error:
+        return (
+            f"Refused: platform_devices for a specific platform requires platform confirmation ({token_error}). "
+            "Do not default to the previous platform for a new device. Call platform_select_prepare(platform), "
+            "ask whether the new device is on that platform or another platform, then retry with the returned token. "
+            "Alternatively call platform_devices(platform='') to list candidates across all connected platforms."
+        )
     return _run_cli(
         cli.cmd_list_devices,
-        argparse.Namespace(platform=platform or None, supported_only=supported_only),
+        argparse.Namespace(platform=platform_id or None, supported_only=supported_only),
     )
 
 

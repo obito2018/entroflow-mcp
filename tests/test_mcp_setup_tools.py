@@ -15,9 +15,11 @@ from tools import setup  # noqa: E402
 
 class McpSetupToolsTests(unittest.TestCase):
     def setUp(self):
+        setup._PENDING_PLATFORM_SELECTIONS.clear()
         setup._PENDING_DEVICE_SETUP_CONFIRMATIONS.clear()
 
     def tearDown(self):
+        setup._PENDING_PLATFORM_SELECTIONS.clear()
         setup._PENDING_DEVICE_SETUP_CONFIRMATIONS.clear()
 
     def test_platform_list_wraps_cli_output(self):
@@ -184,6 +186,34 @@ class McpSetupToolsTests(unittest.TestCase):
 
         self.assertEqual(result, "OK")
         self.assertIsNone(seen["platform"])
+        self.assertTrue(seen["supported_only"])
+
+    def test_platform_devices_requires_platform_confirmation_for_specific_platform(self):
+        result = setup.platform_devices("homeassistant")
+
+        self.assertIn("requires platform confirmation", result)
+        self.assertIn("Do not default to the previous platform", result)
+
+    def test_platform_select_prepare_allows_specific_platform_devices(self):
+        seen = {}
+
+        def fake_cmd(args: argparse.Namespace) -> int:
+            seen["platform"] = args.platform
+            seen["supported_only"] = args.supported_only
+            return 0
+
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(setup.config, "get_connected_iot_platforms", return_value=["homeassistant", "mihome"]),
+        ):
+            prepared = setup.platform_select_prepare("ha")
+        token = re.search(r"platform_confirmation_token=(\S+)", prepared).group(1)
+
+        with patch.object(setup.cli, "cmd_list_devices", fake_cmd):
+            result = setup.platform_devices("homeassistant", platform_confirmation_token=token)
+
+        self.assertEqual(result, "OK")
+        self.assertEqual(seen["platform"], "homeassistant")
         self.assertTrue(seen["supported_only"])
 
     def test_device_setup_requires_confirmation(self):

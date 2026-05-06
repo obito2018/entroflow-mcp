@@ -25,6 +25,7 @@ from tools.setup import (
     platform_connect_qr_url,
     platform_devices,
     platform_list,
+    platform_select_prepare,
 )
 
 Transport = Literal["stdio", "sse", "streamable-http"]
@@ -50,7 +51,8 @@ INSTRUCTIONS = (
     "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
     "- platform_connect_qr(platform, session_id): return renderable Markdown/public URL plus the QR image for a pending scan_qr connection action; use it instead of trying to send local file paths as chat attachments.\n"
     "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after the user scans/confirms.\n"
-    "- platform_devices(platform): list discovered setup candidates and support status.\n"
+    "- platform_select_prepare(platform): prepare confirmation before using a specific platform for a new/unregistered device; ask whether the new device is on this platform or another platform.\n"
+    "- platform_devices(platform): list discovered setup candidates and support status. If platform is specified for new-device setup, it requires the platform_confirmation_token from platform_select_prepare. Use platform='' to list across all connected platforms without assuming one.\n"
     "- device_setup_prepare(...): create a one-time setup confirmation token after the user selected the exact physical/logical device and provided name, location, and remark; show the returned summary to the user and wait for explicit confirmation.\n"
     "- device_setup(...): register a discovered device into runtime only after the user confirms the device_setup_prepare summary; requires the returned confirmation_token.\n"
     "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
@@ -63,7 +65,7 @@ INSTRUCTIONS = (
     "If an action needs parameters such as channel, channels, value, brightness, temperature, or mode, "
     "put them inside action.args; do not invent a third top-level tool parameter. "
     "Example: device_control('homeassistant:<device_id>', {'action': 'turn_on', 'args': {'channels': 'middle'}}).\n"
-    "If the device is not returned by device_search, do not control it; use platform_devices, device_setup_prepare, then device_setup first.\n"
+    "If the device is not returned by device_search, do not control it; for new-device setup, ask/confirm the intended platform with platform_select_prepare before platform_devices(platform=...), then use device_setup_prepare and device_setup.\n"
     "For discovered-but-unregistered devices, do not infer aliases such as main light from model, entity names, domains, or supported status; ask the user to select and set up the exact device.\n"
     "Action names are device-specific by default. Do not assume generic names such as set_power."
 )
@@ -146,6 +148,7 @@ def register_tools(mcp: FastMCP) -> FastMCP:
         return [TextContent(type="text", text=text), Image(data=qr_bytes, format="png")]
 
     mcp.tool()(platform_connect_poll)
+    mcp.tool()(platform_select_prepare)
     mcp.tool()(platform_devices)
     mcp.tool()(device_setup_prepare)
     mcp.tool()(device_setup)
