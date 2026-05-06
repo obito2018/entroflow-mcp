@@ -8,7 +8,8 @@ def device_search(query: str) -> str:
     if not devices:
         return (
             "No devices are registered yet. "
-            "Connect a platform and run `entroflow setup ...` before using runtime tools."
+            "Connect a platform and run `entroflow setup ...` or MCP `device_setup(...)` before control. "
+            "Do not bypass EntroFlow by controlling platform-native entities directly."
         )
 
     if query.lower() == "all":
@@ -24,7 +25,11 @@ def device_search(query: str) -> str:
         ]
 
     if not matched:
-        return f"No registered devices matched '{query}'."
+        return (
+            f"No registered EntroFlow runtime devices matched '{query}'. "
+            "If the platform device was only discovered, run setup first. "
+            "Do not control a platform-native entity directly."
+        )
 
     lines = [f"Found {len(matched)} device(s):", ""]
     for i, d in enumerate(matched, 1):
@@ -54,7 +59,7 @@ def device_status(device_id: str) -> str:
     """Read the current status of a registered device."""
     record = store.find(device_id)
     if not record:
-        return f"Device '{device_id}' was not found. Use device_search first."
+        return f"Device '{device_id}' was not found in EntroFlow runtime. Use device_search first, or set up the discovered platform device before control."
     try:
         device = loader.create_device_instance(record)
         result = device.query_status()
@@ -67,7 +72,7 @@ def device_control(device_id: str, action) -> str:
     """Execute a runtime action on a registered device. Run device_search first to inspect supported_actions."""
     record = store.find(device_id)
     if not record:
-        return f"Device '{device_id}' was not found. Use device_search first."
+        return f"Device '{device_id}' was not found in EntroFlow runtime. Do not control platform-native entities directly; set up the device first."
     try:
         device = loader.create_device_instance(record)
     except Exception as e:

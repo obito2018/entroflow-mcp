@@ -27,6 +27,14 @@ entroflow connect homeassistant --url http://homeassistant.local:8123 --token ey
 
 The Home Assistant connector validates the token and stores the credential locally in EntroFlow runtime storage.
 
+## Control boundary
+
+The Home Assistant token is for EntroFlow connector-managed connection, discovery, and setup. Agents must not use the token to call Home Assistant REST/WebSocket APIs directly for device control.
+
+After connecting, a Home Assistant entity can appear in discovery before it is registered in EntroFlow runtime. Discovery is not control permission. Before controlling any HA device, set up the exact entity with `entroflow setup ...` or MCP `device_setup(...)`, then use `device_search(...)` to inspect the registered EntroFlow device id and `supported_actions`.
+
+If the user asks to control a HA device that is not registered yet, stop and ask to set up the exact discovered entity first. Do not choose a different HA entity or call HA services directly.
+
 ## Verify
 
 ```bash

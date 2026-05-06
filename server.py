@@ -27,6 +27,9 @@ INSTRUCTIONS = (
     "EntroFlow connects agents to physical devices.\n"
     "Use local CLI commands when the `entroflow` executable is available. "
     "In Docker sidecar mode, use the MCP setup tools instead.\n"
+    "EntroFlow is the device-control boundary. Platform-native APIs and credentials "
+    "are for connector-managed connection, discovery, and setup only. Do not bypass "
+    "EntroFlow by calling Home Assistant or other platform APIs directly to control devices.\n"
     "Setup tools:\n"
     "- platform_list(query): list supported platforms.\n"
     "- platform_connect(platform, ...): connect a platform through its connector-defined flow.\n"
@@ -38,6 +41,7 @@ INSTRUCTIONS = (
     "- device_status(device_id): read the current device state.\n"
     "- device_control(device_id, action): execute a runtime action.\n"
     "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
+    "If the device is not returned by device_search, do not control it; use platform_devices and device_setup first.\n"
     "Action names are device-specific by default. Do not assume generic names such as set_power."
 )
 

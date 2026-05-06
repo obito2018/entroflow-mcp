@@ -10,6 +10,8 @@ EntroFlow connects an agent to physical devices.
 
 Use the local `entroflow` CLI when it is available. In Docker sidecar mode, the agent container may not have the CLI; then use the EntroFlow MCP setup tools instead.
 
+EntroFlow is the control boundary. Platform connectors and platform credentials are for connection, discovery, and setup. Do not control devices through platform-native APIs such as Home Assistant REST/WebSocket APIs, even if credentials are available. A device must be set up into EntroFlow runtime before control.
+
 ## Setup Flow
 
 For a new user, platform, or device:
@@ -24,6 +26,8 @@ For a new user, platform, or device:
 8. Set up the device with `entroflow setup ...` or MCP `device_setup(...)`.
 9. Before the first control of a specific device, run `device_search("<device_id>")` and inspect `supported_actions`.
 10. Control the device only with an action name shown in `supported_actions`.
+
+If a device appears in `list-devices` / `platform_devices` but is not set up, stop and ask whether to set it up. Do not control a discovered-but-unregistered platform entity directly.
 
 ## CLI Commands
 
@@ -61,6 +65,8 @@ device_control(device_id, action)
 ```
 
 Before `device_control`, always run `device_search` for that device and inspect `supported_actions`. Action names are device-specific by default; do not assume generic names such as `set_power`.
+
+Never use a platform-native API as a shortcut for runtime control. For Home Assistant, do not call HA services directly to turn lights, switches, covers, or other entities on/off. Use `device_setup` first, then `device_control` on the registered EntroFlow device id.
 
 ## Recovery
 
