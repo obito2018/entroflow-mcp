@@ -2,6 +2,9 @@
 import argparse
 import getpass
 import json
+import os
+import shutil
+import subprocess
 import sys
 import time
 import webbrowser
@@ -15,6 +18,80 @@ from tools.system import check_updates, managed_iot_platforms, update_server
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 PLATFORM_DOCS_DIR = Path.home() / ".entroflow" / "docs" / "platforms"
 BUNDLED_CATALOG_PATH = Path(__file__).resolve().parent / "assets" / "catalog.json"
+
+
+def _is_container_runtime() -> bool:
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    markers = ("docker", "containerd", "kubepods", "podman")
+    return any(marker in cgroup.lower() for marker in markers)
+
+
+def _run_command(args: list[str], timeout: int = 5) -> tuple[int | None, str]:
+    try:
+        proc = subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            check=False,
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except FileNotFoundError:
+        return None, "command not found"
+    except subprocess.TimeoutExpired:
+        return None, "command timed out"
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _detect_openclaw_docker() -> tuple[bool, str]:
+    if not shutil.which("docker"):
+        return False, "docker command not found"
+    code, output = _run_command(["docker", "ps", "--format", "{{.Names}} {{.Image}}"])
+    if code != 0:
+        return False, output or "docker daemon is not reachable"
+    for line in output.splitlines():
+        lower = line.lower()
+        if "openclaw" in lower or "ghcr.io/openclaw/openclaw" in lower:
+            return True, line.strip()
+    return False, "no running OpenClaw container detected"
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    del args
+    _print("EntroFlow Doctor")
+    _print("")
+    _print("Environment:")
+    _print(f"  python       : {sys.executable}")
+    _print(f"  home         : {Path.home()}")
+    _print(f"  entroflow    : {Path.home() / '.entroflow'}")
+    _print(f"  container    : {'yes' if _is_container_runtime() else 'no'}")
+    _print("")
+    _print("MCP server:")
+    _print(f"  stdio command: {sys.executable} {Path(__file__).resolve().parent / 'server.py'}")
+    _print(f"  http transport: streamable-http")
+    _print(f"  http url     : http://127.0.0.1:{os.environ.get('ENTROFLOW_MCP_PORT', '8732')}{os.environ.get('ENTROFLOW_MCP_PATH', '/mcp')}")
+    _print("")
+    found_openclaw, detail = _detect_openclaw_docker()
+    _print("Docker agents:")
+    _print(f"  docker       : {'available' if shutil.which('docker') else 'not found'}")
+    _print(f"  openclaw     : {'detected' if found_openclaw else 'not detected'}")
+    _print(f"  detail       : {detail}")
+    if _is_container_runtime():
+        _print("")
+        _print("Recommendation:")
+        _print("  You are inside a container. For Docker agents, run the installer on the Docker host and use EntroFlow sidecar mode.")
+    elif found_openclaw:
+        _print("")
+        _print("Recommendation:")
+        _print("  OpenClaw Docker is present. Use EntroFlow sidecar mode instead of host-local stdio MCP paths.")
+    return 0
 
 
 def _print(message: str = ""):
@@ -758,6 +835,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     update_parser = subparsers.add_parser("update", help="Update local assets and server code")
     update_parser.set_defaults(func=cmd_update)
+
+    doctor_parser = subparsers.add_parser("doctor", help="Diagnose EntroFlow installation and agent integration")
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     return parser
 

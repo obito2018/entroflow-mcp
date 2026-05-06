@@ -3,8 +3,11 @@
 EntroFlow MCP Server
 Runtime-only MCP surface for already connected and set up devices.
 """
+import argparse
+import os
 import sys
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -12,28 +15,102 @@ from mcp.server.fastmcp import FastMCP
 
 from tools.device import device_control, device_search, device_status
 
+Transport = Literal["stdio", "sse", "streamable-http"]
+DEFAULT_HTTP_HOST = "0.0.0.0"
+DEFAULT_HTTP_PORT = 8732
+DEFAULT_STREAMABLE_HTTP_PATH = "/mcp"
+DEFAULT_SSE_PATH = "/sse"
+DEFAULT_MESSAGE_PATH = "/messages/"
 
-mcp = FastMCP(
-    "EntroFlow",
-    instructions=(
-        "EntroFlow exposes runtime device operations only.\n"
-        "Use the local guide at ~/.entroflow/skill.md for setup and CLI workflows.\n"
-        "Before using runtime tools, make sure the user has already connected a platform "
-        "with `entroflow connect <platform>` and completed device setup with "
-        "`entroflow setup ...`.\n"
-        "Runtime tools:\n"
-        "- device_search(query): find registered devices and inspect supported actions.\n"
-        "- device_status(device_id): read the current device state.\n"
-        "- device_control(device_id, action): execute a runtime action.\n"
-        "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
-        "Do not attempt installation, login, discovery, or updates through MCP."
-    ),
+INSTRUCTIONS = (
+    "EntroFlow exposes runtime device operations only.\n"
+    "Use the local guide at ~/.entroflow/skill.md for setup and CLI workflows.\n"
+    "Before using runtime tools, make sure the user has already connected a platform "
+    "with `entroflow connect <platform>` and completed device setup with "
+    "`entroflow setup ...`.\n"
+    "Runtime tools:\n"
+    "- device_search(query): find registered devices and inspect supported actions.\n"
+    "- device_status(device_id): read the current device state.\n"
+    "- device_control(device_id, action): execute a runtime action.\n"
+    "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
+    "Do not attempt installation, login, discovery, or updates through MCP."
 )
 
-mcp.tool()(device_search)
-mcp.tool()(device_status)
-mcp.tool()(device_control)
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be an integer, got {raw!r}") from exc
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="entroflow-mcp", description="Run the EntroFlow MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=os.environ.get("ENTROFLOW_MCP_TRANSPORT", "stdio"),
+        help="MCP transport to use. Default: stdio, or ENTROFLOW_MCP_TRANSPORT.",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("ENTROFLOW_MCP_HOST", DEFAULT_HTTP_HOST),
+        help="HTTP bind host for sse or streamable-http. Default: 0.0.0.0.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_env_int("ENTROFLOW_MCP_PORT", DEFAULT_HTTP_PORT),
+        help="HTTP bind port for sse or streamable-http. Default: 8732.",
+    )
+    parser.add_argument(
+        "--path",
+        default=os.environ.get("ENTROFLOW_MCP_PATH", DEFAULT_STREAMABLE_HTTP_PATH),
+        help="Streamable HTTP MCP path. Default: /mcp.",
+    )
+    parser.add_argument(
+        "--sse-path",
+        default=os.environ.get("ENTROFLOW_MCP_SSE_PATH", DEFAULT_SSE_PATH),
+        help="SSE endpoint path. Default: /sse.",
+    )
+    parser.add_argument(
+        "--message-path",
+        default=os.environ.get("ENTROFLOW_MCP_MESSAGE_PATH", DEFAULT_MESSAGE_PATH),
+        help="SSE message endpoint path. Default: /messages/.",
+    )
+    return parser.parse_args(argv)
+
+
+def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
+    args = args or parse_args([])
+    return FastMCP(
+        "EntroFlow",
+        instructions=INSTRUCTIONS,
+        host=args.host,
+        port=args.port,
+        streamable_http_path=args.path,
+        sse_path=args.sse_path,
+        message_path=args.message_path,
+    )
+
+
+def register_tools(mcp: FastMCP) -> FastMCP:
+    mcp.tool()(device_search)
+    mcp.tool()(device_status)
+    mcp.tool()(device_control)
+    return mcp
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    mcp = register_tools(create_mcp(args))
+    mcp.run(transport=args.transport)
+
+
+mcp = register_tools(create_mcp(parse_args([])))
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    main()
