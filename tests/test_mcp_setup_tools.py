@@ -28,45 +28,72 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertEqual(seen["query"], "mi")
         self.assertIn("mihome", result)
 
-    def test_platform_connect_passes_non_interactive_connector_inputs(self):
-        seen = {}
+    def test_platform_connect_starts_flow_without_polling(self):
+        class FakeConnector:
+            def connect(self, context):
+                self.context = context
+                return {
+                    "status": "pending",
+                    "session_id": "session-1",
+                    "expires_in": 600,
+                    "message": "Scan QR",
+                    "actions": [{"type": "scan_qr", "file_path": "/shared/qr.png"}],
+                }
 
-        def fake_cmd(args: argparse.Namespace) -> int:
-            seen.update(vars(args))
-            print("connected")
-            return 0
-
-        with patch.object(setup.cli, "cmd_connect", fake_cmd):
+        connector = FakeConnector()
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup, "_prepare_platform_connector", return_value={"connector": {"status": "ready", "version": "1.0.6"}}),
+            patch.object(setup.loader, "load_connector", return_value=connector),
+        ):
             result = setup.platform_connect(
-                "homeassistant",
-                url="http://ha.local:8123",
-                token="secret-token",
+                "mihome",
                 inputs={"room": "lab", "skip": None},
-                presentation="none",
-                timeout=30,
             )
 
-        self.assertEqual(result, "connected")
-        self.assertEqual(seen["platform"], "homeassistant")
-        self.assertTrue(seen["no_prompt"])
-        self.assertEqual(seen["url"], "http://ha.local:8123")
-        self.assertEqual(seen["token"], "secret-token")
-        self.assertEqual(seen["input"], ["room=lab"])
-        self.assertEqual(seen["presentation"], "none")
-        self.assertEqual(seen["timeout"], 30)
+        self.assertIn("status=pending", result)
+        self.assertIn("session_id=session-1", result)
+        self.assertIn("file_path=/shared/qr.png", result)
+        self.assertIn("platform_connect_poll", result)
+        self.assertEqual(connector.context["presentation"], "file")
+        self.assertEqual(connector.context["inputs"], {"room": "lab"})
 
     def test_platform_connect_defaults_to_file_presentation_for_remote_agents(self):
-        seen = {}
+        class FakeConnector:
+            def connect(self, context):
+                self.context = context
+                return {"status": "connected", "message": "connected"}
 
-        def fake_cmd(args: argparse.Namespace) -> int:
-            seen.update(vars(args))
-            return 0
-
-        with patch.object(setup.cli, "cmd_connect", fake_cmd):
+        connector = FakeConnector()
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup, "_prepare_platform_connector", return_value={}),
+            patch.object(setup.loader, "load_connector", return_value=connector),
+            patch.object(setup.config, "add_connected_iot_platform"),
+        ):
             result = setup.platform_connect("mihome")
 
-        self.assertEqual(result, "OK")
-        self.assertEqual(seen["presentation"], "file")
+        self.assertIn("status=connected", result)
+        self.assertEqual(connector.context["presentation"], "file")
+
+    def test_platform_connect_poll_marks_connected(self):
+        class FakeConnector:
+            def poll_connect(self, session_id, context):
+                self.session_id = session_id
+                self.context = context
+                return {"status": "connected", "message": "done"}
+
+        connector = FakeConnector()
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="mihome"),
+            patch.object(setup.loader, "load_connector", return_value=connector),
+            patch.object(setup.config, "add_connected_iot_platform") as add_connected,
+        ):
+            result = setup.platform_connect_poll("mihome", "session-1")
+
+        self.assertIn("status=connected", result)
+        self.assertEqual(connector.session_id, "session-1")
+        add_connected.assert_called_once_with("mihome")
 
     def test_platform_devices_maps_empty_platform_to_none(self):
         seen = {}

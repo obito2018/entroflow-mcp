@@ -22,12 +22,13 @@ For a new user, platform, or device:
 2. Confirm the exact platform id.
 3. Before connecting, read the platform guide if available at `~/.entroflow/docs/platforms/<platform>.md`.
 4. Connect with `entroflow connect <platform>` or MCP `platform_connect(platform, ...)`.
-5. List discovered devices with `entroflow list-devices --platform <platform>` or MCP `platform_devices(platform)`.
-6. Ask the user which exact device to set up.
-7. Ask the user to confirm `name`, `location`, and `remark`; do not invent these values. Put user-facing aliases such as "main light" in `name` or `remark` during setup.
-8. Set up the device with `entroflow setup ...` or MCP `device_setup(...)`.
-9. Before the first control of a specific device, run `device_search("<device_id>")` and inspect `supported_actions`.
-10. Control the device only with an action name shown in `supported_actions`.
+5. If MCP `platform_connect` returns a pending `session_id`, show the returned action to the user and then call `platform_connect_poll(platform, session_id)` after the user scans/confirms.
+6. List discovered devices with `entroflow list-devices --platform <platform>` or MCP `platform_devices(platform)`.
+7. Ask the user which exact device to set up.
+8. Ask the user to confirm `name`, `location`, and `remark`; do not invent these values. Put user-facing aliases such as "main light" in `name` or `remark` during setup.
+9. Set up the device with `entroflow setup ...` or MCP `device_setup(...)`.
+10. Before the first control of a specific device, run `device_search("<device_id>")` and inspect `supported_actions`.
+11. Control the device only with an action name shown in `supported_actions`.
 
 If a device appears in `list-devices` / `platform_devices` but is not set up, stop and ask whether to set it up. Do not control a discovered-but-unregistered platform entity directly.
 
@@ -57,10 +58,13 @@ Setup tools, mainly for Docker sidecar mode:
 ```text
 platform_list(query)
 platform_connect(platform, url, token, inputs, presentation, timeout)
+platform_connect_poll(platform, session_id, url, token, inputs, presentation, timeout)
 platform_devices(platform)
 device_setup(platform, did, model, name, location, remark, version)
 entroflow_update()
 ```
+
+MCP `platform_connect` is non-blocking. It starts the platform-specific connection flow and returns `status`, optional `session_id`, and actions such as a QR file path. Do not wait inside the same tool call for the user to scan. Show the action to the user, then call `platform_connect_poll` with the same `session_id`.
 
 Runtime tools:
 

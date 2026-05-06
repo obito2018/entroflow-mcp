@@ -11,6 +11,7 @@ import io
 from typing import Any, Callable
 
 import cli
+from core import config, loader
 
 
 CliCommand = Callable[[argparse.Namespace], int | None]
@@ -50,27 +51,138 @@ def platform_connect(
 ) -> str:
     """Connect an IoT platform through its connector-defined connection flow.
 
-    The default presentation is file so remote/chat agents get local QR files or
-    other transferable artifacts instead of a browser-only localhost flow.
+    This MCP tool is non-blocking. If the connector returns a pending session,
+    show the returned QR/file/link to the user and then call platform_connect_poll
+    with the returned session_id after the user completes the action.
     """
-    input_items = []
+    platform_id = cli._resolve_platform_or_exit(platform)
+    prepared = _prepare_platform_connector(platform_id)
+    connector = loader.load_connector(platform_id)
+    merged_inputs = _merge_connect_inputs(url, token, inputs)
+    args = _connect_namespace(platform_id, merged_inputs, presentation, timeout)
+    context = cli._build_connect_context(platform_id, args, merged_inputs)
+    result = cli._connector_connect(connector, context)
+    status = cli._connect_status(result)
+    if status in {"connected", "ok"}:
+        config.add_connected_iot_platform(platform_id)
+    return _format_connect_tool_result(platform_id, result, prepared, final=status in {"connected", "ok"})
+
+
+def platform_connect_poll(
+    platform: str,
+    session_id: str,
+    url: str = "",
+    token: str = "",
+    inputs: dict[str, Any] | None = None,
+    presentation: str = "file",
+    timeout: int = 600,
+) -> str:
+    """Poll a pending platform connection session returned by platform_connect."""
+    platform_id = cli._resolve_platform_or_exit(platform)
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return "Missing session_id. Call platform_connect first and pass the returned session_id."
+    connector = loader.load_connector(platform_id)
+    merged_inputs = _merge_connect_inputs(url, token, inputs)
+    args = _connect_namespace(platform_id, merged_inputs, presentation, timeout)
+    context = cli._build_connect_context(platform_id, args, merged_inputs)
+    result = cli._connector_poll_connect(connector, session_id, context)
+    status = cli._connect_status(result)
+    if status in {"connected", "ok"}:
+        config.add_connected_iot_platform(platform_id)
+    return _format_connect_tool_result(platform_id, result, final=status in {"connected", "ok"})
+
+
+def _prepare_platform_connector(platform: str) -> dict[str, Any]:
+    report: dict[str, Any] = {}
+    try:
+        guide_sync = cli.downloader.download_platform_guide(platform)
+        if guide_sync:
+            report["guide"] = guide_sync
+    except Exception as exc:
+        report["guide_error"] = str(exc)
+
+    connector_result = cli._ensure_platform_connector_ready(platform)
+    report["connector"] = connector_result
+    try:
+        refreshed = cli._refresh_platform_devices_table(platform)
+        if refreshed:
+            report["device_table"] = refreshed
+    except Exception as exc:
+        report["device_table_error"] = str(exc)
+    return report
+
+
+def _merge_connect_inputs(url: str, token: str, inputs: dict[str, Any] | None) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    if url:
+        merged["url"] = str(url)
+    if token:
+        merged["token"] = str(token)
     for key, value in (inputs or {}).items():
         if value is None:
             continue
-        input_items.append(f"{key}={value}")
+        merged[str(key)] = str(value)
+    return merged
 
-    return _run_cli(
-        cli.cmd_connect,
-        argparse.Namespace(
-            platform=platform,
-            no_prompt=True,
-            url=url or None,
-            token=token or None,
-            input=input_items,
-            presentation=presentation,
-            timeout=timeout,
-        ),
+
+def _connect_namespace(platform: str, inputs: dict[str, str], presentation: str, timeout: int) -> argparse.Namespace:
+    return argparse.Namespace(
+        platform=platform,
+        no_prompt=True,
+        url=inputs.get("url"),
+        token=inputs.get("token"),
+        input=[f"{key}={value}" for key, value in inputs.items() if key not in {"url", "token"}],
+        presentation=presentation,
+        timeout=timeout,
     )
+
+
+def _format_connect_tool_result(
+    platform: str,
+    result: dict[str, Any],
+    prepared: dict[str, Any] | None = None,
+    final: bool = False,
+) -> str:
+    lines: list[str] = []
+    connector = (prepared or {}).get("connector") if prepared else None
+    if isinstance(connector, dict):
+        connector_status = connector.get("status")
+        connector_version = connector.get("version")
+        if connector_status and connector_version:
+            lines.append(f"connector={connector_status} v{connector_version}")
+    device_table = (prepared or {}).get("device_table") if prepared else None
+    if isinstance(device_table, dict) and device_table.get("count"):
+        lines.append(f"device_table={device_table.get('count')} models")
+
+    status = cli._connect_status(result)
+    lines.append(f"status={status or 'unknown'}")
+    session_id = str(result.get("session_id") or "").strip()
+    if session_id:
+        lines.append(f"session_id={session_id}")
+    expires_in = result.get("expires_in")
+    if expires_in:
+        lines.append(f"expires_in={expires_in}")
+    message = str(result.get("message") or "").strip()
+    if message:
+        lines.append(f"message={message}")
+
+    actions = result.get("actions") or []
+    if isinstance(actions, list) and actions:
+        lines.append("actions:")
+        for index, action in enumerate(actions, 1):
+            if not isinstance(action, dict):
+                continue
+            action_type = str(action.get("type") or "instruction").strip()
+            lines.append(f"  [{index}] type={action_type}")
+            for key in ("message", "file_path", "sidecar_file_path", "url"):
+                value = str(action.get(key) or "").strip()
+                if value:
+                    lines.append(f"      {key}={value}")
+
+    if session_id and not final:
+        lines.append(f"next=Show the action to the user, then call platform_connect_poll(platform='{platform}', session_id='{session_id}').")
+    return "\n".join(lines) if lines else "OK"
 
 
 def platform_devices(platform: str = "") -> str:

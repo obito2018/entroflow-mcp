@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mcp.server.fastmcp import FastMCP
 
 from tools.device import device_control, device_search, device_status
-from tools.setup import device_setup, entroflow_update, platform_connect, platform_devices, platform_list
+from tools.setup import device_setup, entroflow_update, platform_connect, platform_connect_poll, platform_devices, platform_list
 
 Transport = Literal["stdio", "sse", "streamable-http"]
 DEFAULT_HTTP_HOST = "0.0.0.0"
@@ -36,7 +36,8 @@ INSTRUCTIONS = (
     "Do not narrow the list to devices you think are likely, and do not use supported status as identity evidence.\n"
     "Setup tools:\n"
     "- platform_list(query): list supported platforms.\n"
-    "- platform_connect(platform, ...): connect a platform through its connector-defined flow.\n"
+    "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
+    "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after the user scans/confirms.\n"
     "- platform_devices(platform): list discovered platform devices and support status.\n"
     "- device_setup(...): register a discovered device into runtime.\n"
     "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
@@ -117,6 +118,7 @@ def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
 def register_tools(mcp: FastMCP) -> FastMCP:
     mcp.tool()(platform_list)
     mcp.tool()(platform_connect)
+    mcp.tool()(platform_connect_poll)
     mcp.tool()(platform_devices)
     mcp.tool()(device_setup)
     mcp.tool()(entroflow_update)
