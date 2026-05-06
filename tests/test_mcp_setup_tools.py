@@ -169,6 +169,7 @@ class McpSetupToolsTests(unittest.TestCase):
 
         def fake_cmd(args: argparse.Namespace) -> int:
             seen["platform"] = args.platform
+            seen["supported_only"] = args.supported_only
             return 0
 
         with patch.object(setup.cli, "cmd_list_devices", fake_cmd):
@@ -176,6 +177,19 @@ class McpSetupToolsTests(unittest.TestCase):
 
         self.assertEqual(result, "OK")
         self.assertIsNone(seen["platform"])
+        self.assertTrue(seen["supported_only"])
+
+    def test_device_setup_requires_confirmation(self):
+        result = setup.device_setup(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            name="Air Purifier",
+            location="Living Room",
+            remark="main purifier",
+        )
+
+        self.assertIn("requires explicit user confirmation", result)
 
     def test_device_setup_passes_required_registration_fields(self):
         seen = {}
@@ -194,6 +208,7 @@ class McpSetupToolsTests(unittest.TestCase):
                 name="Air Purifier",
                 location="Living Room",
                 remark="main purifier",
+                confirmed=True,
             )
 
         self.assertIn("Registered device", result)
@@ -203,6 +218,7 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertEqual(seen["model"], "zhimi.airpurifier.test")
         self.assertEqual(seen["version"], "1.0.0")
         self.assertEqual(seen["name"], "Air Purifier")
+        self.assertTrue(seen["confirmed"])
 
     def test_run_cli_reports_nonzero_status(self):
         def fake_cmd(_: argparse.Namespace) -> int:

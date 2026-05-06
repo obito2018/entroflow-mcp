@@ -885,6 +885,7 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
         return 1
 
     registered = {item.get("device_id"): item for item in store.load()}
+    supported_only = _is_truthy(getattr(args, "supported_only", False))
     any_output = False
 
     for platform in platforms:
@@ -897,8 +898,19 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
             _print("")
             continue
 
-        _print(f"[{platform}] {len(user_devices)} connected device(s)")
+        display_devices = []
         for item in user_devices:
+            model = item.get("model", "?")
+            if supported_only and model not in supported_models:
+                continue
+            display_devices.append(item)
+
+        if supported_only:
+            _print(f"[{platform}] {len(display_devices)} setup candidate(s) supported by EntroFlow ({len(user_devices)} discovered)")
+        else:
+            _print(f"[{platform}] {len(user_devices)} connected device(s)")
+
+        for item in display_devices:
             did = item.get("did", "?")
             model = item.get("model", "?")
             name = item.get("name", "?")
@@ -931,7 +943,7 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
                 _print(f"  location  : {registered_record.get('location', '-')}")
                 _print(f"  remark    : {registered_record.get('remark', '-')}")
             _print("")
-        any_output = True
+        any_output = any_output or bool(display_devices)
 
         _print(
             "Selection rule: for vague names such as 'main light', do not guess from this list. "
@@ -980,6 +992,14 @@ def _normalize_setup_inputs(args: argparse.Namespace) -> tuple[str, str, str]:
     return _resolve_platform_or_exit(platform), did, model
 
 
+def _is_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "confirmed"}
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     _refresh_catalog()
     platform, did, model = _normalize_setup_inputs(args)
@@ -987,6 +1007,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     if not all([args.name, args.location, args.remark]):
         raise RuntimeError("Setup requires --name, --location, and --remark.")
+
+    if not _is_truthy(getattr(args, "confirmed", False)):
+        raise RuntimeError(
+            "Setup requires explicit user confirmation. Ask the user to confirm the exact platform, "
+            "device_id/did, name, location, and remark, then call setup with confirmed=true. "
+            "Do not invent registration metadata."
+        )
 
     connector = loader.load_connector(platform)
     user_devices = _connector_list_devices(connector)
@@ -1110,6 +1137,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list-devices", help="List devices from connected platforms")
     list_parser.add_argument("--platform", help="Only list devices for one platform")
+    list_parser.add_argument("--supported-only", action="store_true", help="Show only EntroFlow-supported setup candidates")
     list_parser.set_defaults(func=cmd_list_devices)
 
     download_parser = subparsers.add_parser("download", help="Download a device resource into local assets")
@@ -1127,6 +1155,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--name", help="Human-friendly device name")
     setup_parser.add_argument("--location", help="Device location")
     setup_parser.add_argument("--remark", help="Device remark")
+    setup_parser.add_argument("--confirmed", action="store_true", help="Confirm the user approved platform, did, name, location, and remark")
     setup_parser.set_defaults(func=cmd_setup)
 
     update_parser = subparsers.add_parser("update", help="Update local assets and server code")

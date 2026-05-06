@@ -323,6 +323,31 @@ class MihomeCliFlowTests(unittest.TestCase):
         self.assertIn("support   : supported", joined)
         self.assertIn("device_id : mihome:709145591", joined)
 
+    def test_list_devices_supported_only_filters_unsupported_entries(self):
+        self._write_platform_devices("homeassistant", ["ha.xiaomi.airp.va2b"])
+        connector = FakeConnector(
+            poll_results=[],
+            devices=[
+                {"did": "fan.xiaomi_va2b_3cf5_air_purifier", "model": "ha.xiaomi.airp.va2b", "name": "Air Purifier"},
+                {"did": "sensor.xiaomi_va2b_3cf5_temperature", "model": "sensor", "name": "Temperature"},
+            ],
+        )
+        printed: list[str] = []
+
+        with (
+            patch.object(cli, "_refresh_catalog"),
+            patch.object(cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(loader, "load_connector", return_value=connector),
+            patch.object(cli, "_print", side_effect=printed.append),
+        ):
+            rc = cli.cmd_list_devices(argparse.Namespace(platform="homeassistant", supported_only=True))
+
+        self.assertEqual(rc, 0)
+        joined = "\n".join(printed)
+        self.assertIn("1 setup candidate(s) supported by EntroFlow (2 discovered)", joined)
+        self.assertIn("Air Purifier", joined)
+        self.assertNotIn("Temperature", joined)
+
     def test_system_update_messages_are_ascii_safe(self):
         (self.assets_dir / "mihome").mkdir(parents=True, exist_ok=True)
         config.set_platform_version("mihome", "1.0.3")
@@ -615,6 +640,7 @@ class MihomeCliFlowTests(unittest.TestCase):
                     name="Main light switch",
                     location="Living room",
                     remark="Three-gang switch",
+                    confirmed=True,
                 )
             )
 

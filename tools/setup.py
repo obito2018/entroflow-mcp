@@ -324,9 +324,18 @@ def _format_connect_tool_result(
     return "\n".join(lines) if lines else "OK"
 
 
-def platform_devices(platform: str = "") -> str:
-    """List all devices discovered from connected platforms and their support status. Do not narrow vague user requests to likely candidates; ask the user to choose the exact device_id from the full list."""
-    return _run_cli(cli.cmd_list_devices, argparse.Namespace(platform=platform or None))
+def platform_devices(platform: str = "", supported_only: bool = True) -> str:
+    """List setup candidates from connected platforms.
+
+    Default to supported_only=True for chat agents: show only EntroFlow-supported,
+    setup-relevant logical devices. Do not list every Home Assistant entity or ask
+    the user to choose among sibling entities of the same physical device. If the
+    user's requested platform is ambiguous, ask which platform they want before setup.
+    """
+    return _run_cli(
+        cli.cmd_list_devices,
+        argparse.Namespace(platform=platform or None, supported_only=supported_only),
+    )
 
 
 def device_setup(
@@ -337,8 +346,21 @@ def device_setup(
     location: str,
     remark: str,
     version: str = "",
+    confirmed: bool = False,
 ) -> str:
-    """Download the device driver and register a discovered device into runtime."""
+    """Download the device driver and register a discovered device into runtime.
+
+    Call this only after the user explicitly confirms the exact platform,
+    device_id/did, name, location, and remark. If the user has not confirmed all
+    registration fields in the current conversation, ask first and do not call
+    this tool. Set confirmed=true only after that confirmation.
+    """
+    if not confirmed:
+        return (
+            "Refused: device_setup requires explicit user confirmation. Ask the user to confirm "
+            "the exact platform, device_id/did, name, location, and remark, then call "
+            "device_setup(..., confirmed=true). Do not infer or invent registration metadata."
+        )
     return _run_cli(
         cli.cmd_setup,
         argparse.Namespace(
@@ -350,6 +372,7 @@ def device_setup(
             name=name,
             location=location,
             remark=remark,
+            confirmed=confirmed,
         ),
     )
 
