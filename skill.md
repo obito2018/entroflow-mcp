@@ -33,9 +33,12 @@ entroflow connect <platform>
 entroflow list-devices --platform <platform>
 entroflow setup --platform <platform> --did <did> --model <model> --version <version> --name "<name>" --location "<location>" --remark "<remark>"
 entroflow update
+entroflow uninstall
 ```
 
 `entroflow connect <platform>` and `entroflow update` refresh platform guides and platform device support tables.
+
+Use `entroflow uninstall` only when the user explicitly wants to remove EntroFlow. Use `--keep-data` if they want to keep local device data and downloaded assets.
 
 ## MCP Tools
 

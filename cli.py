@@ -3,6 +3,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,9 @@ from tools.system import check_updates, managed_iot_platforms, update_server
 ASSETS_DIR = Path.home() / ".entroflow" / "assets"
 PLATFORM_DOCS_DIR = Path.home() / ".entroflow" / "docs" / "platforms"
 BUNDLED_CATALOG_PATH = Path(__file__).resolve().parent / "assets" / "catalog.json"
+ENTROFLOW_DIR = Path.home() / ".entroflow"
+ENTROFLOW_START_MARKER = "<!-- ENTROFLOW START -->"
+ENTROFLOW_END_MARKER = "<!-- ENTROFLOW END -->"
 
 
 def _is_container_runtime() -> bool:
@@ -123,6 +127,222 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def _print(message: str = ""):
     print(message)
+
+
+def _confirm_uninstall(args: argparse.Namespace) -> bool:
+    if getattr(args, "yes", False):
+        return True
+    if not _is_interactive_stdin():
+        _print("Refusing to uninstall in non-interactive mode without --yes.")
+        return False
+    answer = input("Uninstall EntroFlow from this machine? Type 'yes' to continue: ").strip().lower()
+    return answer == "yes"
+
+
+def _remove_path(path: Path, label: str, report: list[str]) -> None:
+    if not path.exists() and not path.is_symlink():
+        report.append(f"SKIP {label}: not found")
+        return
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        report.append(f"OK   {label}: removed {path}")
+    except Exception as exc:
+        report.append(f"FAIL {label}: {exc}")
+
+
+def _remove_marked_block(path: Path, label: str, report: list[str]) -> None:
+    if not path.exists():
+        report.append(f"SKIP {label}: not found")
+        return
+    try:
+        existing = path.read_text(encoding="utf-8")
+        pattern = re.escape(ENTROFLOW_START_MARKER) + r".*?" + re.escape(ENTROFLOW_END_MARKER)
+        updated, count = re.subn(pattern, "", existing, count=1, flags=re.S)
+        if count == 0:
+            report.append(f"SKIP {label}: marker not found")
+            return
+        updated = re.sub(r"\n{3,}", "\n\n", updated).strip() + "\n" if updated.strip() else ""
+        path.write_text(updated, encoding="utf-8")
+        report.append(f"OK   {label}: removed EntroFlow block from {path}")
+    except Exception as exc:
+        report.append(f"FAIL {label}: {exc}")
+
+
+def _remove_json_key(path: Path, key_path: list[str], label: str, report: list[str]) -> None:
+    if not path.exists():
+        report.append(f"SKIP {label}: not found")
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        current = data
+        for key in key_path[:-1]:
+            if not isinstance(current, dict) or key not in current:
+                report.append(f"SKIP {label}: key not found")
+                return
+            current = current[key]
+        final_key = key_path[-1]
+        if not isinstance(current, dict) or final_key not in current:
+            report.append(f"SKIP {label}: key not found")
+            return
+        current.pop(final_key, None)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        report.append(f"OK   {label}: removed {'.'.join(key_path)} from {path}")
+    except Exception as exc:
+        report.append(f"FAIL {label}: {exc}")
+
+
+def _remove_codex_mcp_block(path: Path, report: list[str]) -> None:
+    if not path.exists():
+        report.append("SKIP Codex MCP config: not found")
+        return
+    try:
+        content = path.read_text(encoding="utf-8")
+        pattern = r"(?ms)^\[mcp_servers\.entroflow\]\s*.*?(?=^\[|\Z)"
+        updated, count = re.subn(pattern, "", content, count=1)
+        if count == 0:
+            report.append("SKIP Codex MCP config: block not found")
+            return
+        path.write_text(updated.strip() + "\n", encoding="utf-8")
+        report.append(f"OK   Codex MCP config: removed EntroFlow block from {path}")
+    except Exception as exc:
+        report.append(f"FAIL Codex MCP config: {exc}")
+
+
+def _remove_skill_allowlist_entry(path: Path, report: list[str]) -> None:
+    if not path.exists():
+        report.append("SKIP OpenClaw skill allowlist: not found")
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        skills = data.get("skills")
+        changed = False
+        if isinstance(skills, list) and "entroflow" in skills:
+            data["skills"] = [item for item in skills if item != "entroflow"]
+            changed = True
+        elif isinstance(skills, dict):
+            allowed = skills.get("allowed")
+            if isinstance(allowed, list) and "entroflow" in allowed:
+                skills["allowed"] = [item for item in allowed if item != "entroflow"]
+                changed = True
+        if changed:
+            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            report.append(f"OK   OpenClaw skill allowlist: removed entroflow from {path}")
+        else:
+            report.append("SKIP OpenClaw skill allowlist: entry not found")
+    except Exception as exc:
+        report.append(f"FAIL OpenClaw skill allowlist: {exc}")
+
+
+def _remove_sidecar(report: list[str]) -> None:
+    if not shutil.which("docker"):
+        report.append("SKIP Docker sidecar: docker command not found")
+        return
+    code, output = _run_command(["docker", "rm", "-f", "entroflow-mcp"], timeout=30)
+    if code == 0:
+        report.append("OK   Docker sidecar: removed container entroflow-mcp")
+    else:
+        report.append(f"SKIP Docker sidecar: {output or 'container not found'}")
+
+
+def _remove_agent_registrations(home: Path, report: list[str]) -> None:
+    _remove_path(home / ".agents" / "skills" / "entroflow", "generic skill", report)
+    _remove_path(home / ".claude" / "skills" / "entroflow", "Claude skill", report)
+    _remove_path(home / ".claude" / "agents" / "entroflow", "Claude capability note", report)
+    _remove_marked_block(home / ".claude" / "CLAUDE.md", "Claude global rule", report)
+
+    _remove_json_key(home / ".cursor" / "mcp.json", ["mcpServers", "entroflow"], "Cursor MCP config", report)
+    _remove_path(home / ".cursor" / "skills" / "entroflow", "Cursor skill", report)
+    _remove_path(home / ".cursor" / "rules" / "entroflow", "Cursor capability note", report)
+    _remove_path(home / ".cursor" / "rules" / "entroflow-always.mdc", "Cursor rule", report)
+
+    _remove_json_key(home / ".codeium" / "windsurf" / "mcp_config.json", ["mcpServers", "entroflow"], "Windsurf MCP config", report)
+    _remove_path(home / ".codeium" / "windsurf" / "skills" / "entroflow", "Windsurf skill", report)
+    _remove_marked_block(home / ".codeium" / "windsurf" / "memories" / "global_rules.md", "Windsurf global rule", report)
+
+    _remove_codex_mcp_block(home / ".codex" / "config.toml", report)
+    _remove_path(home / ".codex" / "skills" / "entroflow", "Codex skill", report)
+
+    _remove_json_key(home / ".gemini" / "settings.json", ["mcpServers", "entroflow"], "Gemini MCP config", report)
+    _remove_path(home / ".gemini" / "skills" / "entroflow", "Gemini capability note", report)
+    _remove_marked_block(home / "GEMINI.md", "Gemini global rule", report)
+
+    _remove_json_key(home / ".cline" / "data" / "settings" / "cline_mcp_settings.json", ["mcpServers", "entroflow"], "Cline MCP config", report)
+    _remove_path(home / ".cline" / "skills" / "entroflow", "Cline capability note", report)
+    _remove_marked_block(home / "Documents" / "Cline" / "Rules" / "entroflow.md", "Cline rule", report)
+
+    _remove_json_key(home / ".copilot" / "mcp-config.json", ["mcpServers", "entroflow"], "GitHub Copilot MCP config", report)
+    _remove_path(home / ".copilot" / "skills" / "entroflow", "GitHub Copilot skill", report)
+
+    openclaw_config = home / ".openclaw" / "openclaw.json"
+    _remove_json_key(openclaw_config, ["mcp", "servers", "entroflow"], "OpenClaw MCP config", report)
+    _remove_json_key(openclaw_config, ["mcpServers", "entroflow"], "OpenClaw legacy MCP config", report)
+    _remove_skill_allowlist_entry(openclaw_config, report)
+    _remove_path(home / ".openclaw" / "skills" / "entroflow", "OpenClaw skill", report)
+    _remove_marked_block(home / ".openclaw" / "AGENTS.md", "OpenClaw bootstrap", report)
+
+    _remove_json_key(home / ".config" / "opencode" / "opencode.json", ["mcp", "entroflow"], "OpenCode MCP config", report)
+    _remove_path(home / ".config" / "opencode" / "skills" / "entroflow", "OpenCode skill", report)
+
+    _remove_json_key(home / ".gemini" / "antigravity" / "mcp_config.json", ["mcpServers", "entroflow"], "Antigravity MCP config", report)
+    _remove_path(home / ".gemini" / "antigravity" / "skills" / "entroflow", "Antigravity skill", report)
+    _remove_marked_block(home / ".gemini" / "GEMINI.md", "Antigravity global rule", report)
+
+    _remove_json_key(home / ".trae" / "mcp.json", ["mcpServers", "entroflow"], "Trae MCP config", report)
+    _remove_path(home / ".trae" / "skills" / "entroflow", "Trae capability note", report)
+    _remove_marked_block(home / ".trae" / "rules" / "user_rules.md", "Trae rule", report)
+
+    _remove_path(home / ".hermes" / "skills" / "entroflow", "Hermes skill", report)
+
+
+def _remove_entoflow_runtime(home: Path, keep_data: bool, report: list[str]) -> None:
+    entroflow_dir = home / ".entroflow"
+    if not entroflow_dir.exists():
+        report.append("SKIP EntroFlow runtime: not found")
+        return
+    if not keep_data:
+        _remove_path(entroflow_dir, "EntroFlow runtime", report)
+        return
+
+    shipped_items = [
+        "server.py",
+        "cli.py",
+        "skill.md",
+        "requirements.txt",
+        "Dockerfile",
+        "core",
+        "tools",
+        "docs",
+        "__pycache__",
+        ".venv",
+    ]
+    for item in shipped_items:
+        _remove_path(entroflow_dir / item, f"EntroFlow code {item}", report)
+    report.append(f"OK   EntroFlow user data: kept config.json, data/, runtime/, and assets/ in {entroflow_dir}")
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    if not _confirm_uninstall(args):
+        return 1
+
+    home = Path.home()
+    report: list[str] = []
+    if not getattr(args, "skip_sidecar", False):
+        _remove_sidecar(report)
+    if not getattr(args, "runtime_only", False):
+        _remove_agent_registrations(home, report)
+    if not getattr(args, "agents_only", False):
+        _remove_path(home / ".local" / "bin" / "entroflow", "CLI launcher", report)
+        _remove_entoflow_runtime(home, getattr(args, "keep_data", False), report)
+
+    _print("EntroFlow uninstall report:")
+    for line in report:
+        _print(f"  {line}")
+    _print("")
+    _print("Restart any running agents so they reload their MCP and skill configuration.")
+    return 0
 
 
 def _refresh_catalog() -> dict:
@@ -865,6 +1085,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Diagnose EntroFlow installation and agent integration")
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    uninstall_parser = subparsers.add_parser("uninstall", help="Remove EntroFlow runtime, agent registrations, and Docker sidecar")
+    uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Do not ask for interactive confirmation")
+    uninstall_parser.add_argument("--keep-data", action="store_true", help="Keep config.json, data/, runtime/, and assets/ under ~/.entroflow")
+    uninstall_parser.add_argument("--agents-only", action="store_true", help="Only remove agent MCP/skill/rule registrations")
+    uninstall_parser.add_argument("--runtime-only", action="store_true", help="Only remove EntroFlow runtime files and CLI launcher")
+    uninstall_parser.add_argument("--skip-sidecar", action="store_true", help="Do not remove the Docker sidecar container")
+    uninstall_parser.set_defaults(func=cmd_uninstall)
 
     return parser
 
