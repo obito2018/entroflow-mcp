@@ -68,7 +68,7 @@ export async function handleTempQrRoutes(path: string, request: Request, env: En
   }
 
   const match = path.match(/^\/v1\/tmp\/login-qr\/([A-Za-z0-9_-]{32,128})$/);
-  if (match && request.method === "GET") {
+  if (match && (request.method === "GET" || request.method === "HEAD")) {
     const token = match[1];
     const key = `${KEY_PREFIX}/${token}`;
     const obj = await env.ASSETS.get(key);
@@ -80,7 +80,7 @@ export async function handleTempQrRoutes(path: string, request: Request, env: En
       return jsonResponse({ error: "QR image expired" }, 410);
     }
 
-    return new Response(obj.body, {
+    return new Response(request.method === "HEAD" ? null : obj.body, {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": obj.httpMetadata?.contentType || "image/png",
