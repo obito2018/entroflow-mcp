@@ -27,8 +27,8 @@ def device_search(query: str) -> str:
     if not matched:
         return (
             f"No registered EntroFlow runtime devices matched '{query}'. "
-            "If the platform device was only discovered, run setup first. "
-            "Do not control a platform-native entity directly."
+            "If the platform device was only discovered, ask the user to select the exact device and run setup first. "
+            "Do not guess from platform entity names, and do not control a platform-native entity directly."
         )
 
     lines = [f"Found {len(matched)} device(s):", ""]
