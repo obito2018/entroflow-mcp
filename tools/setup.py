@@ -70,7 +70,7 @@ def platform_connect(
 
 
 def platform_devices(platform: str = "") -> str:
-    """List devices discovered from connected platforms and their support status."""
+    """List all devices discovered from connected platforms and their support status. Do not narrow vague user requests to likely candidates; ask the user to choose the exact device_id from the full list."""
     return _run_cli(cli.cmd_list_devices, argparse.Namespace(platform=platform or None))
 
 

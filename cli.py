@@ -901,6 +901,13 @@ def cmd_list_devices(args: argparse.Namespace) -> int:
             _print("")
         any_output = True
 
+        _print(
+            "Selection rule: for vague names such as 'main light', do not guess from this list. "
+            "Ask the user to choose the exact device_id from the full list before setup or control. "
+            "Support status does not identify the user's intended device."
+        )
+        _print("")
+
     if not any_output:
         _print("No devices could be listed from the connected platforms.")
         return 1

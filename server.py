@@ -32,7 +32,8 @@ INSTRUCTIONS = (
     "EntroFlow by calling Home Assistant or other platform APIs directly to control devices.\n"
     "Do not guess physical device identity from vague phrases. Control only a registered "
     "EntroFlow device whose name, location, remark, or device_id clearly matches the user request. "
-    "If multiple discovered or registered devices could match, ask the user to choose the exact device.\n"
+    "If no registered alias matches, list all discovered devices or a numbered/pageable full list and ask the user to choose the exact device_id. "
+    "Do not narrow the list to devices you think are likely, and do not use supported status as identity evidence.\n"
     "Setup tools:\n"
     "- platform_list(query): list supported platforms.\n"
     "- platform_connect(platform, ...): connect a platform through its connector-defined flow.\n"
@@ -45,7 +46,7 @@ INSTRUCTIONS = (
     "- device_control(device_id, action): execute a runtime action.\n"
     "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
     "If the device is not returned by device_search, do not control it; use platform_devices and device_setup first.\n"
-    "For discovered-but-unregistered devices, do not infer aliases such as main light from model or entity names; ask the user to select and set up the exact device.\n"
+    "For discovered-but-unregistered devices, do not infer aliases such as main light from model, entity names, domains, or supported status; ask the user to select and set up the exact device.\n"
     "Action names are device-specific by default. Do not assume generic names such as set_power."
 )
 

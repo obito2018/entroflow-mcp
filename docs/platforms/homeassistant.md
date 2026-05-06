@@ -35,7 +35,9 @@ After connecting, a Home Assistant entity can appear in discovery before it is r
 
 If the user asks to control a HA device that is not registered yet, stop and ask to set up the exact discovered entity first. Do not choose a different HA entity or call HA services directly.
 
-Home Assistant entity names are not EntroFlow aliases. If the user says a room name, "main light", "switch", or another household nickname, do not guess from HA entity names or domains. Ask the user to select the exact discovered entity, then store the user's nickname in the EntroFlow `name` or `remark` during setup. Future control should use that registered EntroFlow alias.
+Home Assistant entity names are not EntroFlow aliases. If the user says a room name, "main light", "switch", or another household nickname, do not guess from HA entity names or domains. Show the full discovered device list or a numbered/pageable full list and ask the user to select the exact discovered entity. If none of the shown devices is correct, ask the user to provide the exact entity/device instead of choosing a likely candidate.
+
+Supported status is not identity. Do not treat "the only supported light" as the user's target. After the user selects the exact entity, store the user's nickname in the EntroFlow `name` or `remark` during setup. Future control should use that registered EntroFlow alias.
 
 ## Verify
 

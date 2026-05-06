@@ -31,7 +31,9 @@ For a new user, platform, or device:
 
 If a device appears in `list-devices` / `platform_devices` but is not set up, stop and ask whether to set it up. Do not control a discovered-but-unregistered platform entity directly.
 
-When multiple discovered devices could match the user's phrase, list candidates and ask the user to select the exact device. Do not recommend one candidate as "probably" correct unless the user has already defined that alias in EntroFlow.
+When the user's phrase does not clearly match a registered EntroFlow alias, list all discovered devices from `platform_devices(platform)` or provide a numbered/pageable full list, then ask the user to choose the exact `device_id`. Do not narrow the list to devices you think are likely. Do not say "only" or "unique" based on supported status, model type, entity domain, room guess, or device name guess.
+
+You may say which devices are supported or unsupported, but support status is not identity. A supported floor lamp is not the user's "main light" unless the user explicitly selected it or registered that alias.
 
 ## CLI Commands
 
