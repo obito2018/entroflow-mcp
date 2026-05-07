@@ -29,46 +29,57 @@ from tools.setup import (
 )
 
 Transport = Literal["stdio", "sse", "streamable-http"]
+McpMode = Literal["runtime", "setup", "all"]
 DEFAULT_HTTP_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 8732
 DEFAULT_STREAMABLE_HTTP_PATH = "/mcp"
 DEFAULT_SSE_PATH = "/sse"
 DEFAULT_MESSAGE_PATH = "/messages/"
 
-INSTRUCTIONS = (
+
+def _normalize_mode(mode: str | None) -> McpMode:
+    value = str(mode or "runtime").strip().lower()
+    if value not in {"runtime", "setup", "all"}:
+        raise ValueError(f"ENTROFLOW_MCP_MODE must be one of runtime, setup, all; got {mode!r}")
+    return value  # type: ignore[return-value]
+
+RUNTIME_INSTRUCTIONS = (
     "EntroFlow connects agents to physical devices.\n"
-    "Use local CLI commands when the `entroflow` executable is available. "
-    "In Docker sidecar mode, use the MCP setup tools instead.\n"
-    "EntroFlow is the device-control boundary. Platform-native APIs and credentials "
-    "are for connector-managed connection, discovery, and setup only. Do not bypass "
-    "EntroFlow by calling Home Assistant or other platform APIs directly to control devices.\n"
-    "Do not guess physical device identity from vague phrases. Control only a registered "
-    "EntroFlow device whose name, location, remark, or device_id clearly matches the user request. "
-    "If no registered alias matches, list all discovered devices or a numbered/pageable full list and ask the user to choose the exact device_id. "
-    "Do not narrow the list to devices you think are likely, and do not use supported status as identity evidence.\n"
-    "Setup tools:\n"
-    "- platform_list(query): list supported platforms.\n"
-    "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
-    "- platform_connect_qr(platform, session_id): return renderable Markdown/public URL plus the QR image for a pending scan_qr connection action; use it instead of trying to send local file paths as chat attachments.\n"
-    "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after the user scans/confirms.\n"
-    "- platform_select_prepare(platform): prepare confirmation before using a specific platform for a new/unregistered device; ask whether the new device is on this platform or another platform.\n"
-    "- platform_devices(platform): list discovered setup candidates and support status. If platform is specified for new-device setup, it requires the platform_confirmation_token from platform_select_prepare. Use platform='' to list across all connected platforms without assuming one.\n"
-    "- device_setup_prepare(...): create a one-time setup confirmation token after the user selected the exact physical/logical device and provided name, location, and remark; show the returned summary to the user and wait for explicit confirmation.\n"
-    "- device_setup(...): register a discovered device into runtime only after the user confirms the device_setup_prepare summary; requires the returned confirmation_token.\n"
-    "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
+    "Default MCP mode is runtime-only. Use the local `entroflow` CLI for platform connection, discovery, setup, and update. Docker/OpenClaw sidecar should run with ENTROFLOW_MCP_MODE=all.\n"
+    "EntroFlow is the device-control boundary. Platform-native APIs and credentials are for connector-managed connection, discovery, and setup only. Do not bypass EntroFlow by calling Home Assistant or other platform APIs directly to control devices.\n"
+    "Do not guess physical device identity from vague phrases. Control only a registered EntroFlow device whose name, location, remark, or device_id clearly matches the user request.\n"
     "Runtime tools:\n"
     "- device_search(query): find registered devices and inspect supported actions.\n"
     "- device_status(device_id): read the current device state.\n"
-    "- device_control(device_id, action): execute a runtime action. The action parameter can be a string, "
-    "an object like {'action': '<supported_action>', 'args': {...}}, or a list of those entries.\n"
-    "Before calling device_control for a device, run device_search first and inspect supported_actions.\n"
-    "If an action needs parameters such as channel, channels, value, brightness, temperature, or mode, "
-    "put them inside action.args; do not invent a third top-level tool parameter. "
-    "Example: device_control('homeassistant:<device_id>', {'action': 'turn_on', 'args': {'channels': 'middle'}}).\n"
-    "If the device is not returned by device_search, do not control it; for new-device setup, ask/confirm the intended platform with platform_select_prepare before platform_devices(platform=...), then use device_setup_prepare and device_setup.\n"
-    "For discovered-but-unregistered devices, do not infer aliases such as main light from model, entity names, domains, or supported status; ask the user to select and set up the exact device.\n"
-    "Action names are device-specific by default. Do not assume generic names such as set_power."
+    "- device_control(device_id, action): execute a runtime action. The action parameter can be a string, an object like {'action': '<supported_action>', 'args': {...}}, or a list of those entries.\n"
+    "Before calling device_control for a device, run device_search first and inspect supported_actions. If the device is not returned by device_search, do not control it. Use CLI setup, or sidecar setup MCP tools when ENTROFLOW_MCP_MODE=all."
 )
+
+SETUP_INSTRUCTIONS = (
+    "EntroFlow setup MCP tools are intended for Docker/OpenClaw sidecar mode, where the agent container may not have the local `entroflow` CLI. Prefer CLI setup whenever CLI is available.\n"
+    "Do not default to the previous platform for a new or unregistered device. If the user explicitly named the platform in the current task, use platform_select_prepare(platform, evidence='user_mentioned_platform'). If the platform was just connected, use evidence='just_connected_platform'. Otherwise ask the user which platform to use.\n"
+    "Setup tools:\n"
+    "- platform_list(query): list supported platforms.\n"
+    "- platform_connect(platform, ...): start a connector-defined platform connection flow without blocking for user action.\n"
+    "- platform_connect_qr(platform, session_id): return renderable Markdown/public URL plus the QR image for pending scan_qr.\n"
+    "- platform_connect_poll(platform, session_id, ...): poll a pending connection session after user action.\n"
+    "- platform_select_prepare(platform, evidence): prepare/confirm platform selection and return platform_confirmation_token.\n"
+    "- platform_devices(platform, supported_only, platform_confirmation_token): list discovered setup candidates. Use platform='' to list across connected platforms without assuming one.\n"
+    "- device_setup_prepare(..., platform_confirmation_token): create a one-time device registration confirmation token after exact physical/logical device and registration fields are known.\n"
+    "- device_setup(..., confirmation_token): register the discovered device into runtime only after the user confirms the device_setup_prepare summary.\n"
+    "- entroflow_update(): update server code, platform assets, guides, and support tables.\n"
+    "For QR login in OpenClaw, prefer Message action='send' with target=<current chat target> and media=<public_url>. Do not send local file paths as chat attachments.\n"
+    "After setup, switch back to runtime tools. Never use platform-native APIs for control."
+)
+
+
+def instructions_for_mode(mode: str) -> str:
+    normalized = _normalize_mode(mode)
+    if normalized == "runtime":
+        return RUNTIME_INSTRUCTIONS
+    if normalized == "setup":
+        return SETUP_INSTRUCTIONS
+    return f"{RUNTIME_INSTRUCTIONS}\n\n{SETUP_INSTRUCTIONS}"
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -114,14 +125,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("ENTROFLOW_MCP_MESSAGE_PATH", DEFAULT_MESSAGE_PATH),
         help="SSE message endpoint path. Default: /messages/.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["runtime", "setup", "all"],
+        default=os.environ.get("ENTROFLOW_MCP_MODE", "runtime"),
+        help="Tool surface to expose. runtime exposes only device_search/status/control; setup exposes setup tools; all exposes both. Default: runtime, or ENTROFLOW_MCP_MODE.",
+    )
     return parser.parse_args(argv)
 
 
 def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
     args = args or parse_args([])
+    args.mode = _normalize_mode(getattr(args, "mode", "runtime"))
     return FastMCP(
         "EntroFlow",
-        instructions=INSTRUCTIONS,
+        instructions=instructions_for_mode(args.mode),
         host=args.host,
         port=args.port,
         streamable_http_path=args.path,
@@ -130,7 +148,14 @@ def create_mcp(args: argparse.Namespace | None = None) -> FastMCP:
     )
 
 
-def register_tools(mcp: FastMCP) -> FastMCP:
+def register_runtime_tools(mcp: FastMCP) -> FastMCP:
+    mcp.tool()(device_search)
+    mcp.tool()(device_status)
+    mcp.tool()(device_control)
+    return mcp
+
+
+def register_setup_tools(mcp: FastMCP) -> FastMCP:
     mcp.tool()(platform_list)
     mcp.tool()(platform_connect)
 
@@ -153,19 +178,26 @@ def register_tools(mcp: FastMCP) -> FastMCP:
     mcp.tool()(device_setup_prepare)
     mcp.tool()(device_setup)
     mcp.tool()(entroflow_update)
-    mcp.tool()(device_search)
-    mcp.tool()(device_status)
-    mcp.tool()(device_control)
+    return mcp
+
+
+def register_tools(mcp: FastMCP, mode: str = "runtime") -> FastMCP:
+    normalized = _normalize_mode(mode)
+    if normalized in {"runtime", "all"}:
+        register_runtime_tools(mcp)
+    if normalized in {"setup", "all"}:
+        register_setup_tools(mcp)
     return mcp
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    mcp = register_tools(create_mcp(args))
+    mcp = register_tools(create_mcp(args), args.mode)
     mcp.run(transport=args.transport)
 
 
-mcp = register_tools(create_mcp(parse_args([])))
+_default_args = parse_args([])
+mcp = register_tools(create_mcp(_default_args), _default_args.mode)
 
 
 if __name__ == "__main__":

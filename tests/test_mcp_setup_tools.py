@@ -22,6 +22,14 @@ class McpSetupToolsTests(unittest.TestCase):
         setup._PENDING_PLATFORM_SELECTIONS.clear()
         setup._PENDING_DEVICE_SETUP_CONFIRMATIONS.clear()
 
+    def _platform_token(self, platform: str = "mihome") -> str:
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value=platform),
+            patch.object(setup.config, "get_connected_iot_platforms", return_value=[platform]),
+        ):
+            prepared = setup.platform_select_prepare(platform, evidence="user_mentioned_platform")
+        return re.search(r"platform_confirmation_token=(\S+)", prepared).group(1)
+
     def test_platform_list_wraps_cli_output(self):
         seen = {}
 
@@ -216,6 +224,17 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertEqual(seen["platform"], "homeassistant")
         self.assertTrue(seen["supported_only"])
 
+    def test_platform_select_prepare_accepts_explicit_platform_evidence(self):
+        with (
+            patch.object(setup.cli, "_resolve_platform_or_exit", return_value="homeassistant"),
+            patch.object(setup.config, "get_connected_iot_platforms", return_value=["homeassistant", "mihome"]),
+        ):
+            prepared = setup.platform_select_prepare("ha", evidence="user_mentioned_platform")
+
+        self.assertIn("Platform selection accepted", prepared)
+        self.assertIn("platform_confirmed_by=user_mentioned_platform", prepared)
+        self.assertRegex(prepared, r"platform_confirmation_token=\S+")
+
     def test_device_setup_requires_confirmation(self):
         result = setup.device_setup(
             platform="mihome",
@@ -229,6 +248,23 @@ class McpSetupToolsTests(unittest.TestCase):
         self.assertIn("requires a valid confirmation_token", result)
 
     def test_device_setup_prepare_returns_confirmation_token(self):
+        platform_token = self._platform_token("mihome")
+        result = setup.device_setup_prepare(
+            platform="mihome",
+            did="1",
+            model="zhimi.airpurifier.test",
+            name="Air Purifier",
+            location="Living Room",
+            remark="main purifier",
+            platform_confirmation_token=platform_token,
+        )
+
+        self.assertIn("Device setup confirmation required", result)
+        self.assertIn("platform=mihome", result)
+        self.assertIn("did=1", result)
+        self.assertRegex(result, r"confirmation_token=\S+")
+
+    def test_device_setup_prepare_requires_platform_confirmation(self):
         result = setup.device_setup_prepare(
             platform="mihome",
             did="1",
@@ -238,12 +274,10 @@ class McpSetupToolsTests(unittest.TestCase):
             remark="main purifier",
         )
 
-        self.assertIn("Device setup confirmation required", result)
-        self.assertIn("platform=mihome", result)
-        self.assertIn("did=1", result)
-        self.assertRegex(result, r"confirmation_token=\S+")
+        self.assertIn("requires platform confirmation", result)
 
     def test_device_setup_rejects_token_for_changed_fields(self):
+        platform_token = self._platform_token("mihome")
         prepared = setup.device_setup_prepare(
             platform="mihome",
             did="1",
@@ -251,6 +285,7 @@ class McpSetupToolsTests(unittest.TestCase):
             name="Air Purifier",
             location="Living Room",
             remark="main purifier",
+            platform_confirmation_token=platform_token,
         )
         token = re.search(r"confirmation_token=(\S+)", prepared).group(1)
 
@@ -274,6 +309,7 @@ class McpSetupToolsTests(unittest.TestCase):
             print("Registered device: Air Purifier (mihome:1)")
             return 0
 
+        platform_token = self._platform_token("mihome")
         prepared = setup.device_setup_prepare(
             platform="mihome",
             did="1",
@@ -282,6 +318,7 @@ class McpSetupToolsTests(unittest.TestCase):
             name="Air Purifier",
             location="Living Room",
             remark="main purifier",
+            platform_confirmation_token=platform_token,
         )
         token = re.search(r"confirmation_token=(\S+)", prepared).group(1)
 

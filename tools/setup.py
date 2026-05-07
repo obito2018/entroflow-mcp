@@ -24,12 +24,26 @@ CliCommand = Callable[[argparse.Namespace], int | None]
 
 _SETUP_CONFIRMATION_TTL_SECONDS = 600
 _PLATFORM_SELECTION_TTL_SECONDS = 600
+_PLATFORM_EVIDENCE_VALUES = {
+    "user_mentioned_platform",
+    "just_connected_platform",
+    "single_connected_platform",
+    "user_confirmed_platform",
+}
 _PENDING_PLATFORM_SELECTIONS: dict[str, dict[str, Any]] = {}
 _PENDING_DEVICE_SETUP_CONFIRMATIONS: dict[str, dict[str, Any]] = {}
 
 
 def _normalize_platform_selection(platform: str) -> str:
     return str(platform or "").strip()
+
+
+def _normalize_platform_evidence(evidence: str) -> str:
+    return str(evidence or "").strip().lower()
+
+
+def _platform_evidence_is_valid(evidence: str) -> bool:
+    return _normalize_platform_evidence(evidence) in _PLATFORM_EVIDENCE_VALUES
 
 
 def _prune_expired_platform_selections(now: float | None = None) -> None:
@@ -57,6 +71,16 @@ def _validate_platform_selection_token(platform: str, token: str) -> str | None:
     if pending.get("platform") != normalized_platform:
         return "platform_confirmation_token does not match the requested platform"
     return None
+
+
+def _issue_platform_selection_token(platform_id: str, evidence: str = "") -> str:
+    token = secrets.token_urlsafe(18)
+    _PENDING_PLATFORM_SELECTIONS[token] = {
+        "platform": platform_id,
+        "evidence": _normalize_platform_evidence(evidence),
+        "expires_at": time.time() + _PLATFORM_SELECTION_TTL_SECONDS,
+    }
+    return token
 
 
 def _setup_confirmation_payload(
@@ -406,14 +430,14 @@ def _format_connect_tool_result(
     return "\n".join(lines) if lines else "OK"
 
 
-def platform_select_prepare(platform: str) -> str:
+def platform_select_prepare(platform: str, evidence: str = "") -> str:
     """Prepare confirmation for selecting a platform for new-device setup.
 
     Use this before listing setup candidates for a specific platform when the
-    user mentions a new or unregistered device. Show the returned prompt to the
-    user and ask whether the new device is on this platform or another platform.
-    After the user confirms this platform, pass the returned token to
-    platform_devices.
+    user mentions a new or unregistered device. If the user explicitly named the
+    platform in the current task, or just connected this platform, pass evidence
+    so a token can be issued without asking again. Otherwise show the returned
+    prompt and ask whether the new device is on this platform or another.
     """
     platform_id = _normalize_platform_selection(platform)
     if not platform_id:
@@ -430,12 +454,24 @@ def platform_select_prepare(platform: str) -> str:
         )
 
     _prune_expired_platform_selections()
-    token = secrets.token_urlsafe(18)
-    _PENDING_PLATFORM_SELECTIONS[token] = {
-        "platform": platform_id,
-        "expires_at": time.time() + _PLATFORM_SELECTION_TTL_SECONDS,
-    }
+    evidence_id = _normalize_platform_evidence(evidence)
+    if evidence and not _platform_evidence_is_valid(evidence):
+        return (
+            f"Refused: invalid platform evidence '{evidence}'. Valid evidence values: "
+            f"{', '.join(sorted(_PLATFORM_EVIDENCE_VALUES))}. If none applies, ask the user to choose the platform."
+        )
+    token = _issue_platform_selection_token(platform_id, evidence_id)
     connected_text = ", ".join(connected) if connected else "none recorded"
+    if evidence_id:
+        lines = [
+            "Platform selection accepted for new-device setup.",
+            f"requested_platform={platform_id}",
+            f"platform_confirmed_by={evidence_id}",
+            f"connected_platforms={connected_text}",
+            f"platform_confirmation_token={token}",
+            "next=Use this token with platform_devices and device_setup_prepare. Do not ask the platform question again unless the user changes platform.",
+        ]
+        return "\n".join(lines)
     lines = [
         "Platform selection confirmation required for new-device setup.",
         f"requested_platform={platform_id}",
@@ -479,18 +515,28 @@ def device_setup_prepare(
     location: str,
     remark: str,
     version: str = "",
+    platform_confirmation_token: str = "",
 ) -> str:
     """Prepare a device setup confirmation summary and one-time token.
 
-    Call this after the user selects the exact physical/logical device and has
-    provided name, location, and remark. Show the returned summary to the user
-    and ask them to confirm. Only after the user confirms may device_setup be
-    called with the returned confirmation_token.
+    Call this after the platform was confirmed with platform_select_prepare, and
+    after the user selects the exact physical/logical device and has provided
+    name, location, and remark. Show the returned summary to the user and ask
+    them to confirm. Only after the user confirms may device_setup be called
+    with the returned confirmation_token.
     """
     payload = _setup_confirmation_payload(platform, did, model, name, location, remark, version)
     missing = [key for key in ("platform", "did", "model", "name", "location", "remark") if not payload[key]]
     if missing:
         return f"Refused: missing registration field(s): {', '.join(missing)}. Ask the user before setup."
+    platform_error = _validate_platform_selection_token(payload["platform"], platform_confirmation_token)
+    if platform_error:
+        return (
+            f"Refused: device_setup_prepare requires platform confirmation ({platform_error}). "
+            "Call platform_select_prepare first. If the user explicitly named the platform in the current task, "
+            "pass evidence='user_mentioned_platform'; if the platform was just connected, pass evidence='just_connected_platform'. "
+            "Then pass the returned platform_confirmation_token here."
+        )
 
     _prune_expired_setup_confirmations()
     token = secrets.token_urlsafe(18)

@@ -12,6 +12,7 @@ class ServerTransportTests(unittest.TestCase):
         self.assertEqual(args.host, "0.0.0.0")
         self.assertEqual(args.port, 8732)
         self.assertEqual(args.path, "/mcp")
+        self.assertEqual(args.mode, "runtime")
 
     def test_streamable_http_args(self):
         args = server.parse_args([
@@ -43,11 +44,28 @@ class ServerTransportTests(unittest.TestCase):
         mcp = server.create_mcp(args)
         self.assertIsNotNone(mcp)
 
-    def test_register_tools_exposes_platform_connect_qr(self):
+    def test_default_register_tools_exposes_runtime_only(self):
         args = server.parse_args([])
-        mcp = server.register_tools(server.create_mcp(args))
+        mcp = server.register_tools(server.create_mcp(args), args.mode)
+        tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
+        self.assertEqual(tool_names, {"device_search", "device_status", "device_control"})
+
+    def test_all_mode_registers_setup_and_runtime_tools(self):
+        args = server.parse_args(["--mode", "all"])
+        mcp = server.register_tools(server.create_mcp(args), args.mode)
         tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
         self.assertIn("platform_connect_qr", tool_names)
+        self.assertIn("platform_devices", tool_names)
+        self.assertIn("device_setup", tool_names)
+        self.assertIn("device_control", tool_names)
+
+    def test_setup_mode_registers_setup_only(self):
+        args = server.parse_args(["--mode", "setup"])
+        mcp = server.register_tools(server.create_mcp(args), args.mode)
+        tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
+        self.assertIn("platform_connect_qr", tool_names)
+        self.assertIn("device_setup", tool_names)
+        self.assertNotIn("device_control", tool_names)
 
 
 if __name__ == "__main__":
