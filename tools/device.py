@@ -10,7 +10,8 @@ def device_search(query: str) -> str:
     if not devices:
         return (
             "No devices are registered yet. "
-            "Connect a platform and run `entroflow setup ...` or MCP `device_setup(...)` before control. "
+            "Connect a platform and run `entroflow setup ...` before control. "
+            "In Docker/OpenClaw sidecar mode only, use MCP setup tools with ENTROFLOW_MCP_MODE=all. "
             "Do not bypass EntroFlow by controlling platform-native entities directly."
         )
 

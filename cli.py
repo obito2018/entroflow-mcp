@@ -1011,7 +1011,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if not _is_truthy(getattr(args, "confirmed", False)):
         raise RuntimeError(
             "Setup requires explicit user confirmation. Ask the user to confirm the exact platform, "
-            "device_id/did, name, location, and remark, then call setup with confirmed=true. "
+            "device_id/did, name, location, and remark, then run CLI setup with --confirmed. "
             "Do not invent registration metadata."
         )
 

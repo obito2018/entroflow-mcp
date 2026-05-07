@@ -31,13 +31,17 @@ The Home Assistant connector validates the token and stores the credential local
 
 The Home Assistant token is for EntroFlow connector-managed connection, discovery, and setup. Agents must not use the token to call Home Assistant REST/WebSocket APIs directly for device control.
 
-After connecting, a Home Assistant entity can appear in discovery before it is registered in EntroFlow runtime. Discovery is not control permission. Before controlling any HA device, set up the exact entity with `entroflow setup ...` or MCP `device_setup(...)`, then use `device_search(...)` to inspect the registered EntroFlow device id and `supported_actions`.
+After connecting, Home Assistant devices can appear in discovery before they are registered in EntroFlow runtime. Discovery is not control permission. Before controlling any HA device, set up the exact EntroFlow physical/logical device with `entroflow setup ...`, then use `device_search(...)` to inspect the registered EntroFlow device id and `supported_actions`.
 
-If the user asks to control a HA device that is not registered yet, stop and ask to set up the exact discovered entity first. Do not choose a different HA entity or call HA services directly.
+MCP is runtime-only by default. Use MCP setup tools only in Docker/OpenClaw sidecar mode with `ENTROFLOW_MCP_MODE=all`, where the agent container may not have the local CLI. In sidecar setup, confirm the platform with `platform_select_prepare(...)`, list candidates with `platform_devices(...)`, prepare registration with `device_setup_prepare(...)`, and register with `device_setup(...)` only after the user confirms the summary.
 
-Home Assistant entity names are not EntroFlow aliases. If the user says a room name, "main light", "switch", or another household nickname, do not guess from HA entity names or domains. Show the full discovered device list or a numbered/pageable full list and ask the user to select the exact discovered entity. If none of the shown devices is correct, ask the user to provide the exact entity/device instead of choosing a likely candidate.
+If the user asks to control a HA device that is not registered yet, stop and ask to set up the exact discovered physical/logical device first. Do not choose a different HA entity or call HA services directly.
 
-Supported status is not identity. Do not treat "the only supported light" as the user's target. After the user selects the exact entity, store the user's nickname in the EntroFlow `name` or `remark` during setup. Future control should use that registered EntroFlow alias.
+Home Assistant entity names are not EntroFlow aliases. If the user says a room name, "main light", "switch", or another household nickname, do not guess from HA entity names or domains. Show the full discovered device list or a numbered/pageable full list and ask the user to select the exact discovered device. If none of the shown devices is correct, ask the user to provide the exact device/entity instead of choosing a likely candidate.
+
+Many Home Assistant integrations expose multiple entities for one physical device. EntroFlow setup is per physical/logical device, not per entity. For example, a Xiaomi three-gang switch should be registered as one switch device, with left/middle/right handled as action arguments or aliases in `remark`; an air purifier may have fan, sensor, switch, and button entities grouped under one EntroFlow device.
+
+Supported status is not identity. Do not treat "the only supported light" as the user's target. After the user selects the exact device, store the user's nickname in the EntroFlow `name` or `remark` during setup. Future control should use that registered EntroFlow alias.
 
 ## Verify
 
